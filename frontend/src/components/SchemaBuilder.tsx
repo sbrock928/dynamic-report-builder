@@ -10,6 +10,7 @@ import {
   MenuItem,
   InputLabel,
   FormControl,
+  FormHelperText,
   IconButton,
   Snackbar,
   Alert,
@@ -24,18 +25,36 @@ import {
 } from '@mui/material';
 import Form from '@rjsf/mui';
 import validator from '@rjsf/validator-ajv8';
-import { getSchemas, createSchema, updateSchema, deleteSchema, getPydanticCode } from '../api/api';
-import { Schema, SchemaField } from '../types';
+import { 
+  getSchemas, 
+  createSchema, 
+  updateSchema, 
+  deleteSchema, 
+  getPydanticCode,
+  getAvailableModels,
+  getModelFields
+} from '../api/api';
+import { 
+  Schema, 
+  SchemaField, 
+  ModelInfo, 
+  ModelField,
+  CalculationType,
+  AggregationLevel
+} from '../types';
 
 interface SchemaBuilderFormSchema {
   name: string;
   description?: string;
+  base_model: string;
+  aggregation_level: AggregationLevel;
   fields: SchemaField[];
 }
 
 interface FieldDialogProps {
   open: boolean;
   field: SchemaField | null;
+  modelFields: ModelField[];
   onClose: () => void;
   onSave: (field: SchemaField) => void;
 }
@@ -49,12 +68,24 @@ const fieldTypes = [
   { value: 'object', label: 'Object' },
 ];
 
-const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave }) => {
+const calculationTypes = [
+  { value: 'sum', label: 'Sum' },
+  { value: 'average', label: 'Average' },
+  { value: 'count', label: 'Count' },
+  { value: 'min', label: 'Minimum' },
+  { value: 'max', label: 'Maximum' },
+  { value: 'custom', label: 'Custom Formula' },
+];
+
+const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onClose, onSave }) => {
   const [fieldData, setFieldData] = useState<SchemaField>({
     name: '',
     type: 'string',
     description: '',
     required: false,
+    source_field: undefined,
+    calculation_type: undefined,
+    calculation_params: {},
     default: undefined,
     enum_values: undefined,
   });
@@ -68,6 +99,9 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
         type: 'string',
         description: '',
         required: false,
+        source_field: undefined,
+        calculation_type: undefined,
+        calculation_params: {},
         default: undefined,
         enum_values: undefined,
       });
@@ -121,6 +155,7 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 />
               </FormGroup>
             </Grid>
+            
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -131,6 +166,80 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 rows={2}
               />
             </Grid>
+            
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }}>
+                <Typography variant="subtitle2">Calculation Settings</Typography>
+              </Divider>
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Source Field</InputLabel>
+                <Select
+                  value={fieldData.source_field || ''}
+                  label="Source Field"
+                  onChange={(e) => setFieldData({ ...fieldData, source_field: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {modelFields.map((modelField) => (
+                    <MenuItem key={modelField.name} value={modelField.name}>
+                      {modelField.name} ({modelField.type})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Calculation Type</InputLabel>
+                <Select
+                  value={fieldData.calculation_type || ''}
+                  label="Calculation Type"
+                  onChange={(e) => setFieldData({ 
+                    ...fieldData, 
+                    calculation_type: e.target.value as CalculationType,
+                    calculation_params: e.target.value === 'custom' ? { formula: '' } : {}
+                  })}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {calculationTypes.map((calcType) => (
+                    <MenuItem key={calcType.value} value={calcType.value}>
+                      {calcType.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            {fieldData.calculation_type === 'custom' && (
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Custom Formula"
+                  value={fieldData.calculation_params?.formula || ''}
+                  onChange={(e) => setFieldData({ 
+                    ...fieldData, 
+                    calculation_params: { ...fieldData.calculation_params, formula: e.target.value } 
+                  })}
+                  multiline
+                  rows={2}
+                  helperText="Enter SQL-like formula, e.g., 'amount * 0.75' or 'MAX(amount, 1000)'"
+                />
+              </Grid>
+            )}
+            
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }}>
+                <Typography variant="subtitle2">Additional Settings</Typography>
+              </Divider>
+            </Grid>
+            
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -139,6 +248,7 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 onChange={(e) => setFieldData({ ...fieldData, default: e.target.value })}
               />
             </Grid>
+            
             {fieldData.type === 'string' && (
               <Grid item xs={12}>
                 <TextField
@@ -170,10 +280,14 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
 
 const SchemaBuilder: React.FC = () => {
   const [schemas, setSchemas] = useState<Schema[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelFields, setModelFields] = useState<ModelField[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<Schema | null>(null);
   const [isCreating, setIsCreating] = useState(true);
   const [schemaName, setSchemaName] = useState('');
   const [schemaDescription, setSchemaDescription] = useState('');
+  const [selectedBaseModel, setSelectedBaseModel] = useState('');
+  const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
   const [fields, setFields] = useState<SchemaField[]>([]);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [currentField, setCurrentField] = useState<SchemaField | null>(null);
@@ -183,16 +297,31 @@ const SchemaBuilder: React.FC = () => {
   const [codeDialogOpen, setCodeDialogOpen] = useState(false);
 
   useEffect(() => {
-    loadSchemas();
+    loadData();
   }, []);
 
-  const loadSchemas = async () => {
+  const loadData = async () => {
     try {
-      const loadedSchemas = await getSchemas();
+      const [loadedSchemas, loadedModels] = await Promise.all([
+        getSchemas(),
+        getAvailableModels()
+      ]);
       setSchemas(loadedSchemas);
+      setModels(loadedModels);
     } catch (error) {
-      console.error('Failed to load schemas:', error);
-      setSnackbarMessage('Failed to load schemas');
+      console.error('Failed to load data:', error);
+      setSnackbarMessage('Failed to load data');
+      setSnackbarOpen(true);
+    }
+  };
+
+  const loadModelFields = async (modelId: string) => {
+    try {
+      const fields = await getModelFields(modelId);
+      setModelFields(fields);
+    } catch (error) {
+      console.error('Failed to load model fields:', error);
+      setSnackbarMessage('Failed to load model fields');
       setSnackbarOpen(true);
     }
   };
@@ -203,24 +332,53 @@ const SchemaBuilder: React.FC = () => {
       setSelectedSchema(schema);
       setSchemaName(schema.name);
       setSchemaDescription(schema.description || '');
-      setFields(schema.schema_json.fields || []);
+      setSelectedBaseModel(schema.base_model);
+      setSelectedAggregationLevel(schema.aggregation_level);
+      setFields(schema.fields || []);
       setIsCreating(false);
+      
+      // Load model fields for the selected base model
+      if (schema.base_model) {
+        await loadModelFields(schema.base_model);
+      }
     }
+  };
+
+  const handleBaseModelChange = async (modelId: string) => {
+    setSelectedBaseModel(modelId);
+    await loadModelFields(modelId);
   };
 
   const handleNewSchema = () => {
     setSelectedSchema(null);
     setSchemaName('');
     setSchemaDescription('');
+    setSelectedBaseModel('');
+    setSelectedAggregationLevel('');
     setFields([]);
+    setModelFields([]);
     setIsCreating(true);
   };
 
   const handleSaveSchema = async () => {
     try {
+      if (!selectedBaseModel) {
+        setSnackbarMessage('Please select a base model');
+        setSnackbarOpen(true);
+        return;
+      }
+      
+      if (!selectedAggregationLevel) {
+        setSnackbarMessage('Please select an aggregation level');
+        setSnackbarOpen(true);
+        return;
+      }
+      
       const schemaData: SchemaBuilderFormSchema = {
         name: schemaName,
         description: schemaDescription,
+        base_model: selectedBaseModel,
+        aggregation_level: selectedAggregationLevel as AggregationLevel,
         fields: fields,
       };
 
@@ -234,7 +392,7 @@ const SchemaBuilder: React.FC = () => {
       }
 
       setSnackbarOpen(true);
-      loadSchemas();
+      loadData();
 
       if (savedSchema) {
         setSelectedSchema(savedSchema);
@@ -253,7 +411,7 @@ const SchemaBuilder: React.FC = () => {
         await deleteSchema(selectedSchema.id);
         setSnackbarMessage('Schema deleted successfully');
         setSnackbarOpen(true);
-        loadSchemas();
+        loadData();
         handleNewSchema();
       } catch (error) {
         console.error('Failed to delete schema:', error);
@@ -354,6 +512,19 @@ const SchemaBuilder: React.FC = () => {
         fieldSchema.enum = field.enum_values;
       }
 
+      // Add calculation info to description if available
+      if (field.calculation_type) {
+        const calcDesc = field.source_field 
+          ? `Calculation: ${field.calculation_type} of ${field.source_field}` 
+          : `Calculation: ${field.calculation_type}`;
+        
+        if (fieldSchema.description) {
+          fieldSchema.description += ` (${calcDesc})`;
+        } else {
+          fieldSchema.description = calcDesc;
+        }
+      }
+
       properties[field.name] = fieldSchema;
 
       if (field.required) {
@@ -390,7 +561,7 @@ const SchemaBuilder: React.FC = () => {
                 </MenuItem>
                 {schemas.map((schema) => (
                   <MenuItem key={schema.id} value={schema.id}>
-                    {schema.name}
+                    {schema.name} ({schema.aggregation_level} level)
                   </MenuItem>
                 ))}
               </Select>
@@ -441,17 +612,69 @@ const SchemaBuilder: React.FC = () => {
               rows={1}
             />
           </Grid>
+          <Grid item xs={12}>
+            <FormControl fullWidth margin="normal">
+              <InputLabel id="base-model-label">Base Model</InputLabel>
+              <Select
+                labelId="base-model-label"
+                value={selectedBaseModel}
+                label="Base Model"
+                onChange={(e) => handleBaseModelChange(e.target.value)}
+                disabled={!isCreating && selectedSchema !== null}
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {models.map((model) => (
+                  <MenuItem key={model.id} value={model.id}>
+                    {model.name} {model.description ? `- ${model.description}` : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12}>
+            <FormControl fullWidth margin="normal" required>
+              <InputLabel id="aggregation-level-label">Aggregation Level</InputLabel>
+              <Select
+                labelId="aggregation-level-label"
+                value={selectedAggregationLevel}
+                label="Aggregation Level"
+                onChange={(e) => setSelectedAggregationLevel(e.target.value as AggregationLevel)}
+                disabled={!isCreating && selectedSchema !== null} // Only disable when editing an existing schema
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                <MenuItem value="deal">Deal Level</MenuItem>
+                <MenuItem value="group">Group Level</MenuItem>
+                <MenuItem value="tranche">Tranche Level</MenuItem>
+              </Select>
+              <FormHelperText>
+                Defines the granularity of this UDF. Different aggregation levels can be based on the same model.
+              </FormHelperText>
+            </FormControl>
+          </Grid>
         </Grid>
 
         <Box sx={{ mt: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">Fields</Typography>
-            <Button variant="contained" color="primary" onClick={handleAddField}>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              onClick={handleAddField}
+              disabled={!selectedBaseModel}
+            >
               Add Field
             </Button>
           </Box>
           {fields.length === 0 ? (
-            <Typography color="text.secondary">No fields defined yet. Click "Add Field" to start.</Typography>
+            <Typography color="text.secondary">
+              {!selectedBaseModel 
+                ? "Select a base model first, then add fields." 
+                : "No fields defined yet. Click \"Add Field\" to start."}
+            </Typography>
           ) : (
             <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
               <Box component="thead">
@@ -466,7 +689,10 @@ const SchemaBuilder: React.FC = () => {
                     Required
                   </Box>
                   <Box component="th" sx={{ textAlign: 'left', p: 1 }}>
-                    Description
+                    Calculation
+                  </Box>
+                  <Box component="th" sx={{ textAlign: 'left', p: 1 }}>
+                    Source Field
                   </Box>
                   <Box component="th" sx={{ textAlign: 'right', p: 1 }}>
                     Actions
@@ -486,7 +712,10 @@ const SchemaBuilder: React.FC = () => {
                       {field.required ? 'Yes' : 'No'}
                     </Box>
                     <Box component="td" sx={{ p: 1 }}>
-                      {field.description || '-'}
+                      {field.calculation_type || '-'}
+                    </Box>
+                    <Box component="td" sx={{ p: 1 }}>
+                      {field.source_field || '-'}
                     </Box>
                     <Box component="td" sx={{ p: 1, textAlign: 'right' }}>
                       <Button size="small" onClick={() => handleEditField(index)}>
@@ -504,7 +733,12 @@ const SchemaBuilder: React.FC = () => {
         </Box>
 
         <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" color="primary" onClick={handleSaveSchema} disabled={!schemaName || fields.length === 0}>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={handleSaveSchema} 
+            disabled={!schemaName || !selectedBaseModel || !selectedAggregationLevel || fields.length === 0}
+          >
             {isCreating ? 'Create Schema' : 'Update Schema'}
           </Button>
         </Box>
@@ -520,7 +754,13 @@ const SchemaBuilder: React.FC = () => {
         </Paper>
       )}
 
-      <FieldDialog open={fieldDialogOpen} field={currentField} onClose={() => setFieldDialogOpen(false)} onSave={handleFieldSave} />
+      <FieldDialog 
+        open={fieldDialogOpen} 
+        field={currentField} 
+        modelFields={modelFields}
+        onClose={() => setFieldDialogOpen(false)} 
+        onSave={handleFieldSave} 
+      />
 
       <Dialog open={codeDialogOpen} onClose={() => setCodeDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Pydantic Model Code</DialogTitle>

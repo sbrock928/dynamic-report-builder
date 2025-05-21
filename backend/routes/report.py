@@ -2,71 +2,187 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 import random
+from sqlalchemy import text
 
 from database import get_db
 from schemas.report import ReportLayout, ReportLayoutCreate, ReportLayoutUpdate, ReportDataRequest, ReportDataResponse
 from models.report import ReportLayout as ReportLayoutModel
 from models.schema import SchemaModel
+from model_registry import get_model_class, get_model_fields
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.get("/cycles", response_model=List[str])
 def get_cycle_codes():
+    """Get available cycle codes for reports"""
     # For this example, we'll return predefined cycle codes
+    # In a real system, these would typically come from a database
     return ["12023", "12022", "12201"]
 
 @router.get("/", response_model=List[ReportLayout])
 def get_report_layouts(db: Session = Depends(get_db)):
+    """Get all report layouts"""
     layouts = db.query(ReportLayoutModel).all()
-    return layouts
+    
+    result = []
+    for layout in layouts:
+        # Convert to Pydantic model with schema_ids
+        schema_ids = [schema.id for schema in layout.schemas]
+        
+        result.append(ReportLayout(
+            id=layout.id,
+            name=layout.name,
+            description=layout.description,
+            primary_model=layout.primary_model,
+            aggregation_level=layout.aggregation_level,
+            schema_ids=schema_ids,
+            layout_json=layout.layout_json
+        ))
+    
+    return result
 
 @router.get("/{report_id}", response_model=ReportLayout)
 def get_report_layout(report_id: int, db: Session = Depends(get_db)):
+    """Get a specific report layout by ID"""
     layout = db.query(ReportLayoutModel).filter(ReportLayoutModel.id == report_id).first()
     if layout is None:
         raise HTTPException(status_code=404, detail="Report layout not found")
-    return layout
+    
+    # Convert to Pydantic model with schema_ids
+    schema_ids = [schema.id for schema in layout.schemas]
+    
+    return ReportLayout(
+        id=layout.id,
+        name=layout.name,
+        description=layout.description,
+        primary_model=layout.primary_model,
+        aggregation_level=layout.aggregation_level,
+        schema_ids=schema_ids,
+        layout_json=layout.layout_json
+    )
 
 @router.post("/", response_model=ReportLayout)
 def create_report_layout(layout_create: ReportLayoutCreate, db: Session = Depends(get_db)):
-    # Check if schema exists
-    schema = db.query(SchemaModel).filter(SchemaModel.id == layout_create.schema_id).first()
-    if schema is None:
-        raise HTTPException(status_code=404, detail="Schema not found")
+    """Create a new report layout"""
+    # Validate primary model exists
+    primary_model_class = get_model_class(layout_create.primary_model)
+    if primary_model_class is None:
+        raise HTTPException(status_code=400, detail=f"Primary model '{layout_create.primary_model}' not found")
     
+    # Require aggregation level
+    if not layout_create.aggregation_level:
+        raise HTTPException(status_code=400, detail="Aggregation level is required")
+    
+    # Check if schemas exist and are compatible with the aggregation level
+    schemas = []
+    for schema_id in layout_create.schema_ids:
+        schema = db.query(SchemaModel).filter(SchemaModel.id == schema_id).first()
+        if schema is None:
+            raise HTTPException(status_code=404, detail=f"Schema with ID {schema_id} not found")
+        
+        # Ensure schema aggregation level matches report aggregation level
+        if schema.aggregation_level != layout_create.aggregation_level:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schema with ID {schema_id} has aggregation level '{schema.aggregation_level}' which is incompatible with report aggregation level '{layout_create.aggregation_level}'"
+            )
+        
+        schemas.append(schema)
+    
+    # Create the report layout
     db_layout = ReportLayoutModel(
         name=layout_create.name,
         description=layout_create.description,
-        schema_id=layout_create.schema_id,
+        primary_model=layout_create.primary_model,
+        aggregation_level=layout_create.aggregation_level,
         layout_json=layout_create.layout_json
     )
+    
+    # Add schemas to the report
+    for schema in schemas:
+        db_layout.schemas.append(schema)
+    
     db.add(db_layout)
     db.commit()
     db.refresh(db_layout)
-    return db_layout
+    
+    # Convert to Pydantic model with schema_ids
+    schema_ids = [schema.id for schema in db_layout.schemas]
+    
+    return ReportLayout(
+        id=db_layout.id,
+        name=db_layout.name,
+        description=db_layout.description,
+        primary_model=db_layout.primary_model,
+        aggregation_level=db_layout.aggregation_level,
+        schema_ids=schema_ids,
+        layout_json=db_layout.layout_json
+    )
 
 @router.put("/{report_id}", response_model=ReportLayout)
 def update_report_layout(report_id: int, layout_update: ReportLayoutUpdate, db: Session = Depends(get_db)):
-    # Check if schema exists
-    schema = db.query(SchemaModel).filter(SchemaModel.id == layout_update.schema_id).first()
-    if schema is None:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    
+    """Update an existing report layout"""
+    # Check if report exists
     db_layout = db.query(ReportLayoutModel).filter(ReportLayoutModel.id == report_id).first()
     if db_layout is None:
         raise HTTPException(status_code=404, detail="Report layout not found")
     
+    # Validate primary model exists
+    primary_model_class = get_model_class(layout_update.primary_model)
+    if primary_model_class is None:
+        raise HTTPException(status_code=400, detail=f"Primary model '{layout_update.primary_model}' not found")
+    
+    # Require aggregation level
+    if not layout_update.aggregation_level:
+        raise HTTPException(status_code=400, detail="Aggregation level is required")
+    
+    # Check if schemas exist and are compatible with the aggregation level
+    schemas = []
+    for schema_id in layout_update.schema_ids:
+        schema = db.query(SchemaModel).filter(SchemaModel.id == schema_id).first()
+        if schema is None:
+            raise HTTPException(status_code=404, detail=f"Schema with ID {schema_id} not found")
+        
+        # Ensure schema aggregation level matches report aggregation level
+        if schema.aggregation_level != layout_update.aggregation_level:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schema with ID {schema_id} has aggregation level '{schema.aggregation_level}' which is incompatible with report aggregation level '{layout_update.aggregation_level}'"
+            )
+        
+        schemas.append(schema)
+    
+    # Update the report layout
     db_layout.name = layout_update.name
     db_layout.description = layout_update.description
-    db_layout.schema_id = layout_update.schema_id
+    db_layout.primary_model = layout_update.primary_model
+    db_layout.aggregation_level = layout_update.aggregation_level
     db_layout.layout_json = layout_update.layout_json
+    
+    # Clear existing schemas and add updated ones
+    db_layout.schemas = []
+    for schema in schemas:
+        db_layout.schemas.append(schema)
     
     db.commit()
     db.refresh(db_layout)
-    return db_layout
+    
+    # Convert to Pydantic model with schema_ids
+    schema_ids = [schema.id for schema in db_layout.schemas]
+    
+    return ReportLayout(
+        id=db_layout.id,
+        name=db_layout.name,
+        description=db_layout.description,
+        primary_model=db_layout.primary_model,
+        aggregation_level=db_layout.aggregation_level,
+        schema_ids=schema_ids,
+        layout_json=db_layout.layout_json
+    )
 
 @router.delete("/{report_id}", response_model=bool)
 def delete_report_layout(report_id: int, db: Session = Depends(get_db)):
+    """Delete a report layout"""
     db_layout = db.query(ReportLayoutModel).filter(ReportLayoutModel.id == report_id).first()
     if db_layout is None:
         raise HTTPException(status_code=404, detail="Report layout not found")
@@ -77,44 +193,152 @@ def delete_report_layout(report_id: int, db: Session = Depends(get_db)):
 
 @router.post("/run", response_model=ReportDataResponse)
 def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
+    """Run a report and return the calculated data"""
     # Get the report layout
     report_layout = db.query(ReportLayoutModel).filter(ReportLayoutModel.id == request.report_id).first()
     if report_layout is None:
         raise HTTPException(status_code=404, detail="Report layout not found")
     
-    # Get the schema
-    schema = db.query(SchemaModel).filter(SchemaModel.id == report_layout.schema_id).first()
-    if schema is None:
-        raise HTTPException(status_code=404, detail="Schema not found")
+    # Get the primary model class
+    primary_model_class = get_model_class(report_layout.primary_model)
+    if primary_model_class is None:
+        raise HTTPException(status_code=400, detail=f"Primary model '{report_layout.primary_model}' not found")
     
-    # In a real application, you would fetch actual data based on the schema and cycle code
-    # For this example, we'll generate some random data based on the schema fields
-    fields = schema.schema_json.get("fields", [])
+    # Build the query for the primary model
+    base_query = db.query(primary_model_class)
     
-    # Generate 10 random data rows for demonstration
-    data = []
-    for _ in range(10):
-        row = {}
-        for field in fields:
-            field_name = field["name"]
-            field_type = field["type"]
-            
-            if field_type == "string":
-                row[field_name] = f"Sample {field_name} for {request.cycle_code}"
-            elif field_type == "integer":
-                row[field_name] = random.randint(1, 1000)
-            elif field_type == "number":
-                row[field_name] = round(random.uniform(1.0, 1000.0), 2)
-            elif field_type == "boolean":
-                row[field_name] = random.choice([True, False])
-            else:
-                row[field_name] = None
+    # Apply filters if any
+    if request.filters:
+        # Implementation of filter logic
+        for field, value in request.filters.items():
+            if hasattr(primary_model_class, field):
+                base_query = base_query.filter(getattr(primary_model_class, field) == value)
+    
+    # Execute the base query
+    base_results = base_query.all()
+    
+    # Process results with UDFs from each schema
+    result_data = []
+    for base_record in base_results:
+        # Start with base record data
+        record_data = {}
         
-        data.append(row)
+        # Add primary model fields to the record
+        for column in primary_model_class.__table__.columns:
+            record_data[column.name] = getattr(base_record, column.name)
+        
+        # Apply UDFs from each schema
+        for schema in report_layout.schemas:
+            fields = schema.schema_json.get("fields", [])
+            
+            for field in fields:
+                # Only include fields that are part of the report layout
+                field_name = field.get("name")
+                if field_name in report_layout.layout_json.get("fields", []):
+                    # Calculate UDF value
+                    udf_value = calculate_udf(
+                        db,
+                        base_record, 
+                        schema.base_model,
+                        field.get("source_field"),
+                        field.get("calculation_type"),
+                        field.get("calculation_params", {}),
+                        request.cycle_code,
+                        schema.aggregation_level  # Pass the aggregation level for calculation
+                    )
+                    
+                    # Add to the record with schema prefix to avoid field name conflicts
+                    record_data[f"{schema.name}.{field_name}"] = udf_value
+        
+        result_data.append(record_data)
     
     return ReportDataResponse(
         report_name=report_layout.name,
         cycle_code=request.cycle_code,
-        data=data
+        data=result_data
     )
 
+def calculate_udf(db, base_record, base_model, source_field, calculation_type, params, cycle_code, aggregation_level):
+    """
+    Calculate a UDF value based on the calculation type and parameters.
+    
+    Args:
+        db: Database session
+        base_record: The primary record for this calculation
+        base_model: The model type of the base record
+        source_field: Field from the base model to use in calculation
+        calculation_type: Type of calculation to perform
+        params: Additional parameters for the calculation
+        cycle_code: The cycle code for time-based filtering
+        aggregation_level: The level at which to aggregate (deal, group, tranche)
+        
+    Returns:
+        The calculated value
+    """
+    # For demo purposes, we'll simulate calculations
+    # In a real system, this would involve actual database queries and calculations
+    
+    # Different calculation logic based on aggregation level
+    if aggregation_level == "deal":
+        # Deal level calculations - one calculation per deal
+        if calculation_type == "sum":
+            # Example: Sum related values
+            if base_model == "deal" and source_field == "total_amount":
+                # Simulating sum of tranche amounts for a deal
+                return base_record.total_amount * random.uniform(0.9, 1.1)  # Random variation for demo
+            
+        elif calculation_type == "average":
+            # Example: Average related values
+            if source_field:
+                base_value = getattr(base_record, source_field, 0)
+                return base_value * random.uniform(0.4, 0.6)  # Simulated average
+    
+    elif aggregation_level == "group":
+        # Group level calculations
+        if calculation_type == "count":
+            # Example: Count related records
+            return random.randint(3, 8)  # Simulated count for group level
+        
+    elif aggregation_level == "tranche":
+        # Tranche level calculations - multiple calculations per deal
+        if calculation_type == "min":
+            # Example: Minimum value
+            if source_field:
+                base_value = getattr(base_record, source_field, 0)
+                return base_value * random.uniform(0.7, 0.9)  # Simulated minimum for tranche
+        
+        elif calculation_type == "max":
+            # Example: Maximum value
+            if source_field:
+                base_value = getattr(base_record, source_field, 0)
+                return base_value * random.uniform(1.1, 1.3)  # Simulated maximum for tranche
+    
+    # Custom calculations (for any level)
+    if calculation_type == "custom":
+        # Custom SQL calculation using the formula provided in params
+        formula = params.get("formula")
+        if formula:
+            try:
+                # In a real system, you'd parameterize this SQL to prevent injection
+                # This is simplified for demo purposes
+                sql = f"SELECT ({formula}) as result"
+                result = db.execute(text(sql)).fetchone()
+                if result:
+                    return result[0]
+            except Exception as e:
+                # Log the error and return a default value
+                print(f"Error executing custom calculation: {str(e)}")
+        
+        # Default for custom calculation
+        return random.uniform(100, 1000)  # Random placeholder
+    
+    # Default fallback
+    return 0
+
+
+
+@router.get("/primary-models", response_model=List[Dict[str, Any]])
+def get_primary_models():
+    """Get available primary models for reports"""
+    from model_registry import get_available_models
+    return get_available_models()

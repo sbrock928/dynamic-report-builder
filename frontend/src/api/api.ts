@@ -5,7 +5,9 @@ import {
   ReportLayout, 
   ReportLayoutCreate,
   ReportDataRequest,
-  ReportDataResponse
+  ReportDataResponse,
+  ModelInfo,
+  ModelField
 } from '../types';
 
 const API_URL = 'http://localhost:8000';
@@ -74,5 +76,16 @@ export const runReport = async (request: ReportDataRequest): Promise<ReportDataR
 
 export const getCycleCodes = async (): Promise<string[]> => {
   const response = await axios.get<string[]>(`${API_URL}/reports/cycles`);
+  return response.data;
+};
+
+// Model Registry API
+export const getAvailableModels = async (): Promise<ModelInfo[]> => {
+  const response = await axios.get<ModelInfo[]>(`${API_URL}/models/`);
+  return response.data;
+};
+
+export const getModelFields = async (modelId: string): Promise<ModelField[]> => {
+  const response = await axios.get<ModelField[]>(`${API_URL}/models/${modelId}/fields`);
   return response.data;
 };

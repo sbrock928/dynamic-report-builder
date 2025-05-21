@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Change relative imports to absolute imports
-from database import Base, engine
-from routes import schema, report
+from database import Base, engine, seed_sample_data
+from routes import schema, report, models
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
+
+# Seed sample data
+seed_sample_data()
 
 app = FastAPI(title="Dynamic Schema and Report Builder")
 
@@ -22,12 +24,8 @@ app.add_middleware(
 # Include routers
 app.include_router(schema.router)
 app.include_router(report.router)
+app.include_router(models.router)
 
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Dynamic Schema and Report Builder API"}
-
-# Add this to make the script runnable directly
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

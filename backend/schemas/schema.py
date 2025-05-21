@@ -1,17 +1,32 @@
 from pydantic import BaseModel
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Literal
+from enum import Enum
+
+class CalculationType(str, Enum):
+    SUM = "sum"
+    AVERAGE = "average"
+    COUNT = "count"
+    MIN = "min"
+    MAX = "max"
+    CUSTOM = "custom"
 
 class SchemaField(BaseModel):
     name: str
     type: str
     description: Optional[str] = None
     required: bool = False
+    source_field: Optional[str] = None
+    calculation_type: Optional[CalculationType] = None
+    calculation_params: Optional[Dict[str, Any]] = None
+    format: Optional[str] = None
     default: Optional[Any] = None
     enum_values: Optional[List[Any]] = None
 
 class SchemaBase(BaseModel):
     name: str
     description: Optional[str] = None
+    base_model: str
+    aggregation_level: str
     fields: List[SchemaField]
 
 class SchemaCreate(SchemaBase):
@@ -26,21 +41,6 @@ class Schema(SchemaBase):
 
     class Config:
         from_attributes = True
-
-    @classmethod
-    def from_db_model(cls, db_model: "SchemaModel"):
-        """Convert a database model to a Pydantic Schema model"""
-        fields = []
-        for field_dict in db_model.schema_json.get("fields", []):
-            fields.append(SchemaField(**field_dict))
-        
-        return cls(
-            id=db_model.id,
-            name=db_model.name,
-            description=db_model.description,
-            fields=fields,
-            schema_json=db_model.schema_json
-        )
 
 class PydanticSchemaGenerator(BaseModel):
     schema_json: Dict[str, Any]
