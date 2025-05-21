@@ -11,8 +11,6 @@ import {
   InputLabel,
   FormControl,
   FormHelperText,
-  Snackbar,
-  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -24,31 +22,33 @@ import {
 } from '@mui/material';
 import Form from '@rjsf/mui';
 import validator from '@rjsf/validator-ajv8';
+import { useUdfs } from '../context/UdfContext';
+import { useModels } from '../hooks/useModels';
 import { 
-  getUdfs, 
   createUdf, 
   updateUdf, 
   deleteUdf, 
   getPydanticCode,
-  getAvailableModels,
   getModelFields
-} from '../api/api';
+} from '../services/api';
 import { 
   UDF, 
   UDFField, 
-  ModelInfo, 
   ModelField,
   CalculationType,
   AggregationLevel
 } from '../types';
+import Snackbar from './common/Snackbar';
+import Loading from './common/Loading';
 
-interface UdfBuilderFormSchema {  // Changed from SchemaBuilderFormSchema
+interface UdfBuilderFormSchema {
   name: string;
   description?: string;
   base_model: string;
   aggregation_level: AggregationLevel;
-  fields: UDFField[];  // Changed from SchemaField
+  fields: UDFField[];
 }
+
 interface FieldDialogProps {
   open: boolean;
   field: UDFField | null;
@@ -277,8 +277,11 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
 };
 
 const UdfBuilder: React.FC = () => {
-  const [udfs, setUdfs] = useState<UDF[]>([]);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  // Use context and hooks for data management
+  const { udfs, refreshUdfs, loading: loadingUdfs } = useUdfs();
+  const { models, loading: loadingModels } = useModels();
+  
+  // Local state
   const [modelFields, setModelFields] = useState<ModelField[]>([]);
   const [selectedUdf, setSelectedUdf] = useState<UDF | null>(null);
   const [isCreating, setIsCreating] = useState(true);
@@ -287,43 +290,34 @@ const UdfBuilder: React.FC = () => {
   const [selectedBaseModel, setSelectedBaseModel] = useState('');
   const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
   const [fields, setFields] = useState<UDFField[]>([]);
+  
+  // UI state
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [currentField, setCurrentField] = useState<UDFField | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
   const [pydanticCode, setPydanticCode] = useState('');
   const [codeDialogOpen, setCodeDialogOpen] = useState(false);
+  const [loadingModelFields, setLoadingModelFields] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const [loadedUdfs, loadedModels] = await Promise.all([
-        getUdfs(),
-        getAvailableModels()
-      ]);
-      setUdfs(loadedUdfs);
-      setModels(loadedModels);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      setSnackbarMessage('Failed to load data');
-      setSnackbarOpen(true);
-    }
-  };
-
+  // Load model fields when base model changes
   const loadModelFields = async (modelId: string) => {
     try {
+      setLoadingModelFields(true);
       const fields = await getModelFields(modelId);
       setModelFields(fields);
     } catch (error) {
       console.error('Failed to load model fields:', error);
       setSnackbarMessage('Failed to load model fields');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
+    } finally {
+      setLoadingModelFields(false);
     }
   };
 
+  // Handle UDF selection
   const handleUdfSelect = async (udfId: number) => {
     const udf = udfs.find((s) => s.id === udfId);
     if (udf) {
@@ -342,11 +336,13 @@ const UdfBuilder: React.FC = () => {
     }
   };
 
+  // Handle base model change
   const handleBaseModelChange = async (modelId: string) => {
     setSelectedBaseModel(modelId);
     await loadModelFields(modelId);
   };
 
+  // Reset form for new UDF
   const handleNewUdf = () => {
     setSelectedUdf(null);
     setUdfName('');
@@ -358,16 +354,12 @@ const UdfBuilder: React.FC = () => {
     setIsCreating(true);
   };
 
+  // Save UDF
   const handleSaveUdf = async () => {
     try {
-      if (!selectedBaseModel) {
-        setSnackbarMessage('Please select a base model');
-        setSnackbarOpen(true);
-        return;
-      }
-      
-      if (!selectedAggregationLevel) {
-        setSnackbarMessage('Please select an aggregation level');
+      if (!udfName || !selectedBaseModel || !selectedAggregationLevel || fields.length === 0) {
+        setSnackbarMessage('Please fill all required fields and add at least one field');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
         return;
       }
@@ -389,8 +381,9 @@ const UdfBuilder: React.FC = () => {
         setSnackbarMessage('UDF updated successfully');
       }
 
+      setSnackbarSeverity('success');
       setSnackbarOpen(true);
-      loadData();
+      await refreshUdfs();
 
       if (savedUdf) {
         setSelectedUdf(savedUdf);
@@ -399,26 +392,31 @@ const UdfBuilder: React.FC = () => {
     } catch (error) {
       console.error('Failed to save UDF:', error);
       setSnackbarMessage('Failed to save UDF');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
   };
 
+  // Delete UDF
   const handleDeleteUdf = async () => {
     if (selectedUdf && window.confirm('Are you sure you want to delete this UDF?')) {
       try {
         await deleteUdf(selectedUdf.id);
         setSnackbarMessage('UDF deleted successfully');
+        setSnackbarSeverity('success');
         setSnackbarOpen(true);
-        loadData();
+        await refreshUdfs();
         handleNewUdf();
       } catch (error) {
         console.error('Failed to delete UDF:', error);
         setSnackbarMessage('Failed to delete UDF');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
       }
     }
   };
 
+  // Field management
   const handleAddField = () => {
     setCurrentField(null);
     setFieldDialogOpen(true);
@@ -451,6 +449,7 @@ const UdfBuilder: React.FC = () => {
     setFieldDialogOpen(false);
   };
 
+  // View Pydantic code
   const handleShowPydanticCode = async () => {
     if (selectedUdf) {
       try {
@@ -460,6 +459,7 @@ const UdfBuilder: React.FC = () => {
       } catch (error) {
         console.error('Failed to get Pydantic code:', error);
         setSnackbarMessage('Failed to get Pydantic code');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
       }
     }
@@ -537,12 +537,13 @@ const UdfBuilder: React.FC = () => {
     };
   };
 
-  return (
-    <Box sx={{ p: 3, maxWidth: '100%' }}>
-      <Typography variant="h4" gutterBottom>
-        UDF Builder
-      </Typography>
+  // Show loading state if data is still loading
+  if (loadingUdfs || loadingModels) {
+    return <Loading message="Loading UDF builder..." />;
+  }
 
+  return (
+    <Box sx={{ maxWidth: '100%' }}>
       <Box sx={{ mb: 3 }}>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
@@ -597,6 +598,7 @@ const UdfBuilder: React.FC = () => {
               value={udfName}
               onChange={(e) => setUdfName(e.target.value)}
               margin="normal"
+              required
             />
           </Grid>
           <Grid item xs={12} sm={6}>
@@ -611,7 +613,7 @@ const UdfBuilder: React.FC = () => {
             />
           </Grid>
           <Grid item xs={12}>
-            <FormControl fullWidth margin="normal">
+            <FormControl fullWidth margin="normal" required>
               <InputLabel id="base-model-label">Base Model</InputLabel>
               <Select
                 labelId="base-model-label"
@@ -639,7 +641,7 @@ const UdfBuilder: React.FC = () => {
                 value={selectedAggregationLevel}
                 label="Aggregation Level"
                 onChange={(e) => setSelectedAggregationLevel(e.target.value as AggregationLevel)}
-                disabled={!isCreating && selectedUdf !== null} // Only disable when editing an existing UDF
+                disabled={!isCreating && selectedUdf !== null}
               >
                 <MenuItem value="">
                   <em>None</em>
@@ -662,9 +664,9 @@ const UdfBuilder: React.FC = () => {
               variant="contained" 
               color="primary" 
               onClick={handleAddField}
-              disabled={!selectedBaseModel}
+              disabled={!selectedBaseModel || loadingModelFields}
             >
-              Add Field
+              {loadingModelFields ? <Loading /> : 'Add Field'}
             </Button>
           </Box>
           {fields.length === 0 ? (
@@ -752,6 +754,7 @@ const UdfBuilder: React.FC = () => {
         </Paper>
       )}
 
+      {/* Field Dialog */}
       <FieldDialog 
         open={fieldDialogOpen} 
         field={currentField} 
@@ -760,6 +763,7 @@ const UdfBuilder: React.FC = () => {
         onSave={handleFieldSave} 
       />
 
+      {/* Pydantic Code Dialog */}
       <Dialog open={codeDialogOpen} onClose={() => setCodeDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Pydantic Model Code for UDF</DialogTitle>
         <DialogContent>
@@ -773,6 +777,7 @@ const UdfBuilder: React.FC = () => {
             onClick={() => {
               navigator.clipboard.writeText(pydanticCode);
               setSnackbarMessage('Code copied to clipboard');
+              setSnackbarSeverity('success');
               setSnackbarOpen(true);
             }}
           >
@@ -781,15 +786,13 @@ const UdfBuilder: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Snackbar for notifications */}
       <Snackbar
         open={snackbarOpen}
-        autoHideDuration={6000}
+        message={snackbarMessage}
+        severity={snackbarSeverity}
         onClose={() => setSnackbarOpen(false)}
-      >
-        <Alert onClose={() => setSnackbarOpen(false)} severity="success" sx={{ width: '100%' }}>
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
+      />
     </Box>
   );
 };

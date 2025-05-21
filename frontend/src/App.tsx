@@ -1,23 +1,24 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Box, CssBaseline } from '@mui/material';
-import Sidebar from './components/Sidebar';
-import UdfBuilder from './components/UdfBuilder'; // Renamed from SchemaBuilder
-import ReportBuilder from './components/ReportBuilder';
+import MainLayout from './components/layout/MainLayout';
+import UdfsPage from './pages/UdfsPage';
+import ReportsPage from './pages/ReportsPage';
+import { UdfProvider } from './context/UdfContext';
+import { ReportProvider } from './context/ReportContext';
 
 const App: React.FC = () => {
   return (
     <Router>
-      <Box sx={{ display: 'flex' }}>
-        <CssBaseline />
-        <Sidebar />
-        <Box component="main" sx={{ flexGrow: 1, height: '100vh', overflow: 'auto' }}>
-          <Routes>
-            <Route path="/" element={<UdfBuilder />} />
-            <Route path="/reports" element={<ReportBuilder />} />
-          </Routes>
-        </Box>
-      </Box>
+      <UdfProvider>
+        <ReportProvider>
+          <MainLayout>
+            <Routes>
+              <Route path="/" element={<UdfsPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+            </Routes>
+          </MainLayout>
+        </ReportProvider>
+      </UdfProvider>
     </Router>
   );
 };

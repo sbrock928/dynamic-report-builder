@@ -11,37 +11,29 @@ import {
   InputLabel,
   FormControl,
   FormHelperText,
-  Snackbar,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Checkbox,
-  FormControlLabel,
-  CircularProgress,
-  Divider,
   Chip,
-  ListItemText,
   OutlinedInput,
 } from '@mui/material';
+import { useReports } from '../context/ReportContext';
+import { useUdfs } from '../context/UdfContext';
+import { useModels } from '../hooks/useModels';
+import { useCycleCodes } from '../hooks/useCycleCodes';
+import { useReportData } from '../hooks/useReportData';
+import { filterUdfsByAggregationLevel, exportToCsv, createSafeFileName } from '../utils/helpers';
+import { ReportLayout, AggregationLevel } from '../types';
 import {
-  getUdfs,  // Updated from getSchemas
-  getReportLayouts,
   createReportLayout,
   updateReportLayout,
   deleteReportLayout,
-  runReport,
-  getCycleCodes,
-  getAvailableModels,
-} from '../api/api';
-import { UDF, UDFField, ReportLayout, ModelInfo, AggregationLevel } from '../types';  // Updated from Schema to UDF
+} from '../services/api';
+import Snackbar from '../components/common/Snackbar';
+import Loading from '../components/common/Loading';
+import FieldsDialog from './reports/FieldsDialog';
+import ReportDataTable from './reports/ReportDataTable';
 
 const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
@@ -55,75 +47,57 @@ const MenuProps = {
 };
 
 const ReportBuilder: React.FC = () => {
-  const [udfs, setUdfs] = useState<UDF[]>([]);  // Updated from schemas to udfs
-  const [reports, setReports] = useState<ReportLayout[]>([]);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  // Fetch data using custom hooks
+  const { reports, refreshReports, loading: loadingReports } = useReports();
+  const { udfs, loading: loadingUdfs } = useUdfs();
+  const { models, loading: loadingModels } = useModels();
+  const { cycleCodes, loading: loadingCycleCodes } = useCycleCodes();
+  const { reportData, isLoading: isReportRunning, executeReport } = useReportData();
+  
+  // Local state
   const [selectedReport, setSelectedReport] = useState<ReportLayout | null>(null);
   const [reportName, setReportName] = useState('');
   const [reportDescription, setReportDescription] = useState('');
   const [isCreating, setIsCreating] = useState(true);
-  const [selectedUdfIds, setSelectedUdfIds] = useState<number[]>([]);  
+  const [selectedUdfIds, setSelectedUdfIds] = useState<number[]>([]);
   const [selectedPrimaryModel, setSelectedPrimaryModel] = useState('');
   const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
-  const [cycleCodes, setCycleCodes] = useState<string[]>([]);
   const [selectedCycleCode, setSelectedCycleCode] = useState('');
-  const [reportData, setReportData] = useState<Record<string, any>[]>([]);
+  
+  // UI state
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
   const [fieldSelectOpen, setFieldSelectOpen] = useState(false);
-  const [isReportRunning, setIsReportRunning] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-
+  
+  // Initialize data
   useEffect(() => {
-    loadData();
-  }, []);
-
-  // Debug effect to help identify issues
-  useEffect(() => {
-    console.log('Available UDFs:', udfs);  // Updated from schemas to udfs
-    console.log('Selected aggregation level:', selectedAggregationLevel);
-    console.log('Compatible UDFs:', getCompatibleUdfs());  // Updated from getCompatibleSchemas
-  }, [udfs, selectedAggregationLevel]);  // Updated from schemas to udfs
-
-  const loadData = async () => {
-    try {
-      const [udfData, reportData, cycleData, modelData] = await Promise.all([  // Updated from schemaData to udfData
-        getUdfs(),  // Updated from getSchemas
-        getReportLayouts(),
-        getCycleCodes(),
-        getAvailableModels(),
-      ]);
-      setUdfs(udfData);  // Updated from setSchemas to setUdfs
-      setReports(reportData);
-      setCycleCodes(cycleData);
-      setModels(modelData);
-      if (cycleData.length > 0) {
-        setSelectedCycleCode(cycleData[0]);
-      }
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      setSnackbarMessage('Failed to load data');
-      setSnackbarOpen(true);
+    if (cycleCodes.length > 0 && !selectedCycleCode) {
+      setSelectedCycleCode(cycleCodes[0]);
     }
+  }, [cycleCodes, selectedCycleCode]);
+
+  // Selected UDFs based on aggregation level
+  const getCompatibleUdfs = () => {
+    return filterUdfsByAggregationLevel(udfs, selectedAggregationLevel);
   };
 
-  const getCompatibleUdfs = () => {  // Updated from getCompatibleSchemas
-    if (!selectedAggregationLevel) return [];
-    
-    // Return UDFs that match the selected aggregation level
-    return udfs.filter(udf => udf.aggregation_level === selectedAggregationLevel);  // Updated from schemas to udfs
+  const getSelectedUdfs = () => {
+    return udfs.filter(udf => selectedUdfIds.includes(udf.id));
   };
 
+  // Handlers
   const handlePrimaryModelSelect = (modelId: string) => {
     setSelectedPrimaryModel(modelId);
     // Reset selected UDFs when primary model changes
-    setSelectedUdfIds([]);  // Updated from setSelectedSchemaIds
+    setSelectedUdfIds([]);
   };
 
-  const handleUdfSelect = (event: React.ChangeEvent<{ value: unknown }>) => {  // Updated from handleSchemaSelect
-    const udfIds = event.target.value as number[];  // Updated from schemaIds
-    setSelectedUdfIds(udfIds);  // Updated from setSelectedSchemaIds
+  const handleUdfSelect = (event: React.ChangeEvent<{ value: unknown }>) => {
+    const udfIds = event.target.value as number[];
+    setSelectedUdfIds(udfIds);
     
     // Reset field selection when UDFs change
     setSelectedFields([]);
@@ -137,7 +111,7 @@ const ReportBuilder: React.FC = () => {
       setReportDescription(report.description || '');
       setSelectedPrimaryModel(report.primary_model);
       setSelectedAggregationLevel(report.aggregation_level);
-      setSelectedUdfIds(report.udf_ids);  // Updated from schema_ids to udf_ids
+      setSelectedUdfIds(report.udf_ids);
       
       // Set the selected fields from the report layout
       const reportFields = report.layout_json.fields || [];
@@ -153,28 +127,16 @@ const ReportBuilder: React.FC = () => {
     setReportDescription('');
     setSelectedPrimaryModel('');
     setSelectedAggregationLevel('');
-    setSelectedUdfIds([]);  // Updated from setSelectedSchemaIds
+    setSelectedUdfIds([]);
     setSelectedFields([]);
     setIsCreating(true);
-    setReportData([]);
   };
 
   const handleSaveReport = async () => {
     try {
-      if (!selectedPrimaryModel) {
-        setSnackbarMessage('Please select a primary model');
-        setSnackbarOpen(true);
-        return;
-      }
-
-      if (!selectedAggregationLevel) {
-        setSnackbarMessage('Please select an aggregation level');
-        setSnackbarOpen(true);
-        return;
-      }
-
-      if (selectedUdfIds.length === 0) {  // Updated from selectedSchemaIds
-        setSnackbarMessage('Please select at least one UDF');  // Updated from schema to UDF
+      if (!reportName || !selectedPrimaryModel || !selectedAggregationLevel || selectedUdfIds.length === 0 || selectedFields.length === 0) {
+        setSnackbarMessage('Please fill in all required fields');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
         return;
       }
@@ -184,7 +146,7 @@ const ReportBuilder: React.FC = () => {
         description: reportDescription,
         primary_model: selectedPrimaryModel,
         aggregation_level: selectedAggregationLevel as AggregationLevel,
-        udf_ids: selectedUdfIds,  // Updated from schema_ids to udf_ids
+        udf_ids: selectedUdfIds,
         layout_json: {
           fields: selectedFields,
         },
@@ -199,8 +161,9 @@ const ReportBuilder: React.FC = () => {
         setSnackbarMessage('Report layout updated successfully');
       }
 
+      setSnackbarSeverity('success');
       setSnackbarOpen(true);
-      await loadData();
+      await refreshReports();
 
       if (savedReport) {
         setSelectedReport(savedReport);
@@ -209,6 +172,7 @@ const ReportBuilder: React.FC = () => {
     } catch (error) {
       console.error('Failed to save report layout:', error);
       setSnackbarMessage('Failed to save report layout');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
   };
@@ -218,12 +182,14 @@ const ReportBuilder: React.FC = () => {
       try {
         await deleteReportLayout(selectedReport.id);
         setSnackbarMessage('Report layout deleted successfully');
+        setSnackbarSeverity('success');
         setSnackbarOpen(true);
-        await loadData();
+        await refreshReports();
         handleNewReport();
       } catch (error) {
         console.error('Failed to delete report layout:', error);
         setSnackbarMessage('Failed to delete report layout');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
       }
     }
@@ -232,109 +198,45 @@ const ReportBuilder: React.FC = () => {
   const handleRunReport = async () => {
     if (selectedReport && selectedCycleCode) {
       try {
-        setIsReportRunning(true);
-        const result = await runReport({
+        await executeReport({
           report_id: selectedReport.id,
           cycle_code: selectedCycleCode,
         });
-        setReportData(result.data);
         setSnackbarMessage('Report generated successfully');
+        setSnackbarSeverity('success');
         setSnackbarOpen(true);
       } catch (error) {
-        console.error('Failed to run report:', error);
         setSnackbarMessage('Failed to run report');
+        setSnackbarSeverity('error');
         setSnackbarOpen(true);
-      } finally {
-        setIsReportRunning(false);
       }
     }
   };
 
-  const handleFieldToggle = (fieldName: string) => {
-    setSelectedFields((prev) => {
-      if (prev.includes(fieldName)) {
-        return prev.filter((f) => f !== fieldName);
-      } else {
-        return [...prev, fieldName];
-      }
-    });
+  const handleFieldsChange = (fields: string[]) => {
+    setSelectedFields(fields);
   };
 
-  const handleSelectAllFields = () => {
-    const allFields: string[] = [];
-    
-    // Get fields from all selected UDFs
-    selectedUdfIds.forEach(udfId => {  // Updated from schemaId to udfId
-      const udf = udfs.find(s => s.id === udfId);  // Updated from schema to udf
-      if (udf) {
-        udf.fields.forEach(field => {
-          allFields.push(`${udf.name}.${field.name}`);
-        });
-      }
-    });
-    
-    setSelectedFields(allFields);
-  };
-
-  const handleDeselectAllFields = () => {
-    setSelectedFields([]);
-  };
-
-  const exportToCsv = () => {
-    if (reportData.length === 0) {
+  const handleExportToCsv = () => {
+    if (reportData.length === 0 || selectedFields.length === 0) {
       setSnackbarMessage('No data to export');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
     }
 
-    // Create CSV content
-    const header = selectedFields.join(',');
-    const rows = reportData.map((row) => {
-      return selectedFields
-        .map((field) => {
-          const value = row[field];
-          return typeof value === 'string' ? `"${value}"` : value;
-        })
-        .join(',');
-    });
-    const csvContent = `${header}\n${rows.join('\n')}`;
-
-    // Create download link
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const reportNameSafe = reportName.replace(/[^\w\s]/gi, '');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${reportNameSafe}_${selectedCycleCode}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
+    const reportNameSafe = createSafeFileName(reportName);
+    exportToCsv(reportData, selectedFields, `${reportNameSafe}_${selectedCycleCode}`);
     setExportDialogOpen(false);
   };
 
-  // Get selected UDFs
-  const getSelectedUdfs = () => {  // Updated from getSelectedSchemas
-    return udfs.filter(udf => selectedUdfIds.includes(udf.id));  // Updated from schemas to udfs
-  };
-
-  // Group fields by UDF
-  const getFieldsByUdf = () => {  // Updated from getFieldsBySchema
-    const fieldGroups: Record<string, UDFField[]> = {};  // Updated from SchemaField to UDFField
-    
-    getSelectedUdfs().forEach(udf => {  // Updated from getSelectedSchemas
-      fieldGroups[udf.name] = udf.fields;
-    });
-    
-    return fieldGroups;
-  };
+  // Show loading state if initial data is still loading
+  if (loadingReports || loadingUdfs || loadingModels || loadingCycleCodes) {
+    return <Loading message="Loading report builder..." />;
+  }
 
   return (
-    <Box sx={{ p: 3, maxWidth: '100%' }}>
-      <Typography variant="h4" gutterBottom>
-        Report Builder
-      </Typography>
-
+    <Box sx={{ maxWidth: '100%' }}>
       <Box sx={{ mb: 3 }}>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
@@ -384,6 +286,7 @@ const ReportBuilder: React.FC = () => {
               value={reportName}
               onChange={(e) => setReportName(e.target.value)}
               margin="normal"
+              required
             />
           </Grid>
           <Grid item xs={12} sm={6}>
@@ -399,7 +302,7 @@ const ReportBuilder: React.FC = () => {
           </Grid>
           
           <Grid item xs={12}>
-            <FormControl fullWidth margin="normal">
+            <FormControl fullWidth margin="normal" required>
               <InputLabel id="primary-model-label">Primary Model</InputLabel>
               <Select
                 labelId="primary-model-label"
@@ -428,7 +331,7 @@ const ReportBuilder: React.FC = () => {
                 value={selectedAggregationLevel}
                 label="Aggregation Level"
                 onChange={(e) => setSelectedAggregationLevel(e.target.value as AggregationLevel)}
-                disabled={!isCreating && selectedReport !== null} // Only disable when editing an existing report
+                disabled={!isCreating && selectedReport !== null}
               >
                 <MenuItem value="">
                   <em>None</em>
@@ -444,7 +347,7 @@ const ReportBuilder: React.FC = () => {
           </Grid>
           
           <Grid item xs={12}>
-            <FormControl fullWidth margin="normal">
+            <FormControl fullWidth margin="normal" required>
               <InputLabel id="udfs-label">UDFs</InputLabel>
               <Select
                 labelId="udfs-label"
@@ -465,17 +368,11 @@ const ReportBuilder: React.FC = () => {
                 MenuProps={MenuProps}
                 disabled={!selectedPrimaryModel || !selectedAggregationLevel || (!isCreating && selectedReport !== null)}
               >
-                {udfs
-                  .filter(udf => udf.aggregation_level === selectedAggregationLevel)
-                  .map((udf) => (
-                    <MenuItem key={udf.id} value={udf.id}>
-                      <Checkbox checked={selectedUdfIds.includes(udf.id)} />
-                      <ListItemText 
-                        primary={udf.name} 
-                        secondary={`${udf.fields.length} fields`} 
-                      />
-                    </MenuItem>
-                  ))}
+                {getCompatibleUdfs().map((udf) => (
+                  <MenuItem key={udf.id} value={udf.id}>
+                    {udf.name} ({udf.fields.length} fields)
+                  </MenuItem>
+                ))}
               </Select>
               <FormHelperText>
                 {!selectedAggregationLevel 
@@ -512,7 +409,6 @@ const ReportBuilder: React.FC = () => {
                   key={field}
                   label={field}
                   sx={{ backgroundColor: '#f5f5f5' }}
-                  onDelete={() => handleFieldToggle(field)}
                 />
               ))}
             </Box>
@@ -562,7 +458,7 @@ const ReportBuilder: React.FC = () => {
                   onClick={handleRunReport}
                   disabled={isReportRunning || !selectedCycleCode}
                 >
-                  {isReportRunning ? <CircularProgress size={24} /> : 'Run Report'}
+                  {isReportRunning ? <Loading /> : 'Run Report'}
                 </Button>
                 <Button
                   variant="outlined"
@@ -576,94 +472,28 @@ const ReportBuilder: React.FC = () => {
           </Grid>
 
           <Box sx={{ mt: 3 }}>
-            {reportData.length > 0 ? (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      {selectedFields.map((field) => (
-                        <TableCell key={field}>{field}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {reportData.map((row, rowIndex) => (
-                      <TableRow key={rowIndex}>
-                        {selectedFields.map((field) => (
-                          <TableCell key={field}>{row[field]}</TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+            {isReportRunning ? (
+              <Loading message="Generating report..." />
             ) : (
-              <Typography color="text.secondary">
-                {isReportRunning
-                  ? 'Generating report...'
-                  : 'Run the report to see data here.'}
-              </Typography>
+              <ReportDataTable 
+                data={reportData} 
+                fields={selectedFields}
+              />
             )}
           </Box>
         </Paper>
       )}
 
-      <Dialog open={fieldSelectOpen} onClose={() => setFieldSelectOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Select Fields to Include</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mb: 2, mt: 1 }}>
-            <Button variant="outlined" size="small" onClick={handleSelectAllFields}>
-              Select All
-            </Button>
-            <Button variant="outlined" size="small" onClick={handleDeselectAllFields} sx={{ ml: 1 }}>
-              Deselect All
-            </Button>
-          </Box>
-          <Divider sx={{ mb: 2 }} />
-          
-          {Object.entries(getFieldsByUdf()).map(([udfName, fields]) => (
-            <Box key={udfName} sx={{ mb: 3 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                {udfName}
-              </Typography>
-              <Grid container spacing={1}>
-                {fields.map((field) => {
-                  const fieldFullName = `${udfName}.${field.name}`;
-                  
-                  return (
-                    <Grid item xs={12} sm={6} key={fieldFullName}>
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={selectedFields.includes(fieldFullName)}
-                            onChange={() => handleFieldToggle(fieldFullName)}
-                          />
-                        }
-                        label={
-                          <Box>
-                            <Typography variant="body1">{field.name}</Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {field.type}
-                              {field.description ? ` - ${field.description}` : ''}
-                              {field.calculation_type ? ` (${field.calculation_type})` : ''}
-                            </Typography>
-                          </Box>
-                        }
-                        sx={{ display: 'block', mb: 1 }}
-                      />
-                    </Grid>
-                  );
-                })}
-              </Grid>
-              <Divider sx={{ my: 2 }} />
-            </Box>
-          ))}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setFieldSelectOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      {/* Field Selection Dialog */}
+      <FieldsDialog
+        open={fieldSelectOpen}
+        onClose={() => setFieldSelectOpen(false)}
+        udfs={getSelectedUdfs()}
+        selectedFields={selectedFields}
+        onFieldsChange={handleFieldsChange}
+      />
 
+      {/* Export Dialog */}
       <Dialog open={exportDialogOpen} onClose={() => setExportDialogOpen(false)}>
         <DialogTitle>Export Report</DialogTitle>
         <DialogContent>
@@ -673,21 +503,19 @@ const ReportBuilder: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
-          <Button onClick={exportToCsv} variant="contained" color="primary">
+          <Button onClick={handleExportToCsv} variant="contained" color="primary">
             Export
           </Button>
         </DialogActions>
       </Dialog>
 
+      {/* Notification Snackbar */}
       <Snackbar
         open={snackbarOpen}
-        autoHideDuration={6000}
+        message={snackbarMessage}
+        severity={snackbarSeverity}
         onClose={() => setSnackbarOpen(false)}
-      >
-        <Alert onClose={() => setSnackbarOpen(false)} severity="success" sx={{ width: '100%' }}>
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
+      />
     </Box>
   );
 };
