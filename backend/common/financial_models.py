@@ -1,9 +1,9 @@
-# backend/models/financial.py
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 
-from database import Base
+from common.database import Base
+
 
 class Deal(Base):
     __tablename__ = "deals"
@@ -19,6 +19,7 @@ class Deal(Base):
     # Relationship to tranches
     tranches = relationship("Tranche", back_populates="deal")
 
+
 class Tranche(Base):
     __tablename__ = "tranches"
 
@@ -32,9 +33,10 @@ class Tranche(Base):
 
     # Relationship to deal
     deal = relationship("Deal", back_populates="tranches")
-    
+
     # Relationship to cashflows
     cashflows = relationship("CashFlow", back_populates="tranche")
+
 
 class CashFlow(Base):
     __tablename__ = "cashflows"
@@ -45,6 +47,6 @@ class CashFlow(Base):
     principal: Mapped[float] = mapped_column(Float)
     interest: Mapped[float] = mapped_column(Float)
     fees: Mapped[float] = mapped_column(Float)
-    
+
     # Relationship to tranche
     tranche = relationship("Tranche", back_populates="cashflows")

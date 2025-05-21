@@ -1,15 +1,16 @@
-# backend/routes/model_registry.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 
-from model_registry import get_available_models, get_model_fields
+from common.model_registry import get_available_models, get_model_fields
 
 router = APIRouter(prefix="/models", tags=["models"])
+
 
 @router.get("/", response_model=List[Dict[str, Any]])
 def get_models():
     """Get all available data models"""
     return get_available_models()
+
 
 @router.get("/{model_id}/fields", response_model=List[Dict[str, Any]])
 def get_fields(model_id: str):

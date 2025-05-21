@@ -2,16 +2,17 @@
 from sqlalchemy import Column, Integer, String, JSON, ForeignKey, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from database import Base
-from models.udf import UDFModel  # Updated import
+from common.database import Base
+from udf.models import UDFModel  # Updated import
 
 # Junction table for many-to-many relationship between reports and UDFs
 report_udfs = Table(  # Renamed from report_schemas
-    "report_udfs",    # Renamed from report_schemas
+    "report_udfs",  # Renamed from report_schemas
     Base.metadata,
     Column("report_id", Integer, ForeignKey("report_layouts.id")),
-    Column("udf_id", Integer, ForeignKey("udfs.id"))  # Updated foreign key
+    Column("udf_id", Integer, ForeignKey("udfs.id")),  # Updated foreign key
 )
+
 
 class ReportLayout(Base):
     __tablename__ = "report_layouts"
@@ -24,4 +25,6 @@ class ReportLayout(Base):
     layout_json: Mapped[dict] = mapped_column(JSON)
 
     # Many-to-many relationship with UDFs
-    udfs = relationship("UDFModel", secondary=report_udfs, backref="report_layouts")  # Renamed
+    udfs = relationship(
+        "UDFModel", secondary=report_udfs, backref="report_layouts"
+    )  # Renamed
