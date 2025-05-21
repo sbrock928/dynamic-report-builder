@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Box, CssBaseline } from '@mui/material';
 import Sidebar from './components/Sidebar';
-import SchemaBuilder from './components/SchemaBuilder';
+import UdfBuilder from './components/UdfBuilder'; // Renamed from SchemaBuilder
 import ReportBuilder from './components/ReportBuilder';
 
 const App: React.FC = () => {
@@ -13,7 +13,7 @@ const App: React.FC = () => {
         <Sidebar />
         <Box component="main" sx={{ flexGrow: 1, height: '100vh', overflow: 'auto' }}>
           <Routes>
-            <Route path="/" element={<SchemaBuilder />} />
+            <Route path="/" element={<UdfBuilder />} />
             <Route path="/reports" element={<ReportBuilder />} />
           </Routes>
         </Box>
