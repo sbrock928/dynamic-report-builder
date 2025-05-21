@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Dict, Any
 
 from common.database import get_db
 from udf.schemas import UDF, UDFCreate, UDFUpdate, PydanticUDFGenerator
 from udf.models import UDFModel
 from common.model_registry import get_model_class, get_model_fields
+from udf.calculations import get_available_calculations
 
 router = APIRouter(prefix="/udfs", tags=["udfs"])
 
@@ -84,6 +85,30 @@ def create_udf(udf_create: UDFCreate, db: Session = Depends(get_db)):
                 detail=f"Source field '{field.source_field}' not found in model '{udf_create.base_model}'",
             )
 
+    # Find the primary key field of the base model
+    primary_key_field = next((f for f in model_fields if f["primary_key"]), None)
+    if not primary_key_field:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Base model '{udf_create.base_model}' has no primary key field"
+        )
+
+    # Create a UDFField for the primary key
+    from udf.schemas import UDFField
+    pk_field = UDFField(
+        name=primary_key_field["name"],
+        type="integer" if "int" in primary_key_field["type"].lower() else "string",
+        description=f"Primary key from {udf_create.base_model}",
+        required=True,
+        source_field=primary_key_field["name"]
+    )
+
+    # Add the primary key field at the beginning of the fields list
+    # Check if the PK is already included in the user-defined fields
+    pk_name = primary_key_field["name"]
+    if not any(field.name == pk_name for field in udf_create.fields):
+        udf_create.fields.insert(0, pk_field)
+
     # Convert the UDFCreate to a JSON schema
     schema_json = {
         "name": udf_create.name,
@@ -144,6 +169,29 @@ def update_udf(udf_id: int, udf_update: UDFUpdate, db: Session = Depends(get_db)
                 status_code=400,
                 detail=f"Source field '{field.source_field}' not found in model '{udf_update.base_model}'",
             )
+            
+    # Find the primary key field of the base model
+    primary_key_field = next((f for f in model_fields if f["primary_key"]), None)
+    if not primary_key_field:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Base model '{udf_update.base_model}' has no primary key field"
+        )
+
+    # Create a UDFField for the primary key if it doesn't exist
+    from udf.schemas import UDFField
+    pk_name = primary_key_field["name"]
+    
+    # Check if the PK is already included in the user-defined fields
+    if not any(field.name == pk_name for field in udf_update.fields):
+        pk_field = UDFField(
+            name=pk_name,
+            type="integer" if "int" in primary_key_field["type"].lower() else "string",
+            description=f"Primary key from {udf_update.base_model}",
+            required=True,
+            source_field=pk_name
+        )
+        udf_update.fields.insert(0, pk_field)
 
     # Convert the UDFUpdate to a JSON schema
     schema_json = {
@@ -212,3 +260,9 @@ def get_model_available_fields(model_id: str):
     if not fields:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
     return fields
+
+
+@router.get("/calculations/{aggregation_level}", response_model=List[Dict[str, Any]])
+def get_calculations_for_level(aggregation_level: str):
+    """Get available calculations for a specific aggregation level"""
+    return get_available_calculations(aggregation_level)

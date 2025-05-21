@@ -43,6 +43,11 @@ export const getPydanticCode = async (id: number): Promise<string> => {
   return response.data;
 };
 
+export const getCalculationsForLevel = async (aggregationLevel: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(`${API_URL}/udfs/calculations/${aggregationLevel}`);
+  return response.data;
+};
+
 // Report API
 export const getReportLayouts = async (): Promise<ReportLayout[]> => {
   const response = await axios.get<ReportLayout[]>(`${API_URL}/reports/`);

@@ -233,6 +233,9 @@ def delete_report_layout(report_id: int, db: Session = Depends(get_db)):
 @router.post("/run", response_model=ReportDataResponse)
 def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
     """Run a report and return the calculated data"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Get the report layout
     report_layout = (
         db.query(ReportLayoutModel)
@@ -243,6 +246,7 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Report layout not found")
 
     # Get the primary model class
+    logger.info(f"Running report with primary model: {report_layout.primary_model}")
     primary_model_class = get_model_class(report_layout.primary_model)
     if primary_model_class is None:
         raise HTTPException(
@@ -264,6 +268,7 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
 
     # Execute the base query
     base_results = base_query.all()
+    logger.info(f"Found {len(base_results)} records for report")
 
     # Process results with UDFs from each UDF
     result_data = []
@@ -277,12 +282,18 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
 
         # Apply UDFs from each UDF
         for udf in report_layout.udfs:  # Updated from schemas to udfs
+            logger.info(f"Processing UDF: {udf.name} (model: {udf.base_model}, level: {udf.aggregation_level})")
             fields = udf.udf_json.get("fields", [])
-
+            
             for field in fields:
-                # Only include fields that are part of the report layout
                 field_name = field.get("name")
-                if field_name in report_layout.layout_json.get("fields", []):
+                # Check if this field should be included in the report
+                layout_fields = report_layout.layout_json.get("fields", [])
+                full_field_name = f"{udf.name}.{field_name}"
+                
+                if field_name in layout_fields or full_field_name in layout_fields:
+                    logger.info(f"Calculating field: {field_name} (type: {field.get('calculation_type')})")
+                    
                     # Calculate UDF value
                     udf_value = calculate_udf(
                         db,
@@ -292,8 +303,10 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
                         field.get("calculation_type"),
                         field.get("calculation_params", {}),
                         request.cycle_code,
-                        udf.aggregation_level,  # Pass the aggregation level for calculation
+                        udf.aggregation_level,
                     )
+                    
+                    logger.info(f"Calculated value for {field_name}: {udf_value}")
 
                     # Add to the record with UDF prefix to avoid field name conflicts
                     record_data[f"{udf.name}.{field_name}"] = udf_value
@@ -317,23 +330,39 @@ def calculate_udf(
 ):
     """
     Calculate a UDF value based on the calculation type and parameters.
-
-    Args:
-        db: Database session
-        base_record: The primary record for this calculation
-        base_model: The model type of the base record
-        source_field: Field from the base model to use in calculation
-        calculation_type: Type of calculation to perform
-        params: Additional parameters for the calculation
-        cycle_code: The cycle code for time-based filtering
-        aggregation_level: The level at which to aggregate (deal, group, tranche)
-
-    Returns:
-        The calculated value
     """
-    # For demo purposes, we'll simulate calculations
-    # In a real system, this would involve actual database queries and calculations
+    # Import the calculation registry
+    from udf.calculations import get_calculation_function
+    import logging
+    import traceback
+    import random
+    from sqlalchemy import text
 
+    logger = logging.getLogger(__name__)
+    
+    # Log input parameters for debugging
+    logger.info(f"UDF Calculation request - model: {base_model}, type: {calculation_type}, level: {aggregation_level}")
+    logger.info(f"Params: {params}, source_field: {source_field}")
+    
+    # Get the appropriate calculation function from the registry
+    calc_func = get_calculation_function(calculation_type, aggregation_level)
+    
+    if calc_func:
+        try:
+            # Execute the registered calculation
+            logger.info(f"Using registered calculation function: {calc_func.__name__}")
+            result = calc_func(db, base_record, base_model, source_field, params, cycle_code)
+            logger.info(f"Calculation result: {result}")
+            return result
+        except Exception as e:
+            # Log the error and stack trace
+            logger.error(f"Error in calculation {calculation_type}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0
+    
+    # If no registered calculation found, fall back to current approach for backward compatibility
+    logger.warning(f"No registered calculation found for {calculation_type} at {aggregation_level} level, using fallback")
+    
     # Different calculation logic based on aggregation level
     if aggregation_level == "deal":
         # Deal level calculations - one calculation per deal
@@ -341,21 +370,25 @@ def calculate_udf(
             # Example: Sum related values
             if base_model == "deal" and source_field == "total_amount":
                 # Simulating sum of tranche amounts for a deal
-                return base_record.total_amount * random.uniform(
-                    0.9, 1.1
-                )  # Random variation for demo
+                result = base_record.total_amount * random.uniform(0.9, 1.1)
+                logger.info(f"Fallback sum calculation result: {result}")
+                return result
 
         elif calculation_type == "average":
             # Example: Average related values
             if source_field:
                 base_value = getattr(base_record, source_field, 0)
-                return base_value * random.uniform(0.4, 0.6)  # Simulated average
+                result = base_value * random.uniform(0.4, 0.6)
+                logger.info(f"Fallback average calculation result: {result}")
+                return result
 
     elif aggregation_level == "group":
         # Group level calculations
         if calculation_type == "count":
             # Example: Count related records
-            return random.randint(3, 8)  # Simulated count for group level
+            result = random.randint(3, 8)
+            logger.info(f"Fallback count calculation result: {result}")
+            return result
 
     elif aggregation_level == "tranche":
         # Tranche level calculations - multiple calculations per deal
@@ -363,17 +396,17 @@ def calculate_udf(
             # Example: Minimum value
             if source_field:
                 base_value = getattr(base_record, source_field, 0)
-                return base_value * random.uniform(
-                    0.7, 0.9
-                )  # Simulated minimum for tranche
+                result = base_value * random.uniform(0.7, 0.9)
+                logger.info(f"Fallback min calculation result: {result}")
+                return result
 
         elif calculation_type == "max":
             # Example: Maximum value
             if source_field:
                 base_value = getattr(base_record, source_field, 0)
-                return base_value * random.uniform(
-                    1.1, 1.3
-                )  # Simulated maximum for tranche
+                result = base_value * random.uniform(1.1, 1.3)
+                logger.info(f"Fallback max calculation result: {result}")
+                return result
 
     # Custom calculations (for any level)
     if calculation_type == "custom":
@@ -382,19 +415,24 @@ def calculate_udf(
         if formula:
             try:
                 # In a real system, you'd parameterize this SQL to prevent injection
-                # This is simplified for demo purposes
                 sql = f"SELECT ({formula}) as result"
+                logger.info(f"Executing custom SQL: {sql}")
                 result = db.execute(text(sql)).fetchone()
                 if result:
+                    logger.info(f"Custom SQL result: {result[0]}")
                     return result[0]
             except Exception as e:
                 # Log the error and return a default value
-                print(f"Error executing custom calculation: {str(e)}")
+                logger.error(f"Error executing custom calculation: {str(e)}")
+                logger.error(traceback.format_exc())
 
         # Default for custom calculation
-        return random.uniform(100, 1000)  # Random placeholder
+        result = random.uniform(100, 1000)
+        logger.info(f"Fallback custom calculation result: {result}")
+        return result
 
     # Default fallback
+    logger.warning("No calculation performed, returning 0")
     return 0
 
 

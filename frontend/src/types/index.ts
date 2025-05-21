@@ -77,9 +77,27 @@ export interface ModelField {
   foreign_key: boolean;
 }
 
-export type CalculationType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'custom';
+export type CalculationType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'custom' | 'mapping';
 
 export interface CalculationParams {
   formula?: string;
   [key: string]: any;
+}
+
+export interface CalculationParam {
+  name: string;
+  display_name: string;
+  type: string;
+  options?: string[];
+  default?: any;
+  required?: boolean;
+  description?: string;
+}
+
+export interface CalculationDefinition {
+  type: string;
+  level: string | null;
+  display_name: string;
+  description: string;
+  params: CalculationParam[];
 }

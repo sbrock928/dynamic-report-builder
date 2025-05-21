@@ -10,6 +10,7 @@ class CalculationType(str, Enum):
     MIN = "min"
     MAX = "max"
     CUSTOM = "custom"
+    MAPPING = "mapping"  # New mapping type for static values
 
 
 class UDFField(BaseModel):

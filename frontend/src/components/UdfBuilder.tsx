@@ -19,6 +19,7 @@ import {
   Checkbox,
   FormGroup,
   Divider,
+  CircularProgress,
 } from '@mui/material';
 import Form from '@rjsf/mui';
 import validator from '@rjsf/validator-ajv8';
@@ -29,14 +30,17 @@ import {
   updateUdf, 
   deleteUdf, 
   getPydanticCode,
-  getModelFields
+  getModelFields,
+  getCalculationsForLevel
 } from '../services/api';
 import { 
   UDF, 
   UDFField, 
   ModelField,
   CalculationType,
-  AggregationLevel
+  AggregationLevel,
+  CalculationDefinition,
+  CalculationParam
 } from '../types';
 import Snackbar from './common/Snackbar';
 import Loading from './common/Loading';
@@ -53,6 +57,7 @@ interface FieldDialogProps {
   open: boolean;
   field: UDFField | null;
   modelFields: ModelField[];
+  aggregationLevel: AggregationLevel | ''; // Added aggregation level to props
   onClose: () => void;
   onSave: (field: UDFField) => void;
 }
@@ -75,7 +80,7 @@ const calculationTypes = [
   { value: 'custom', label: 'Custom Formula' },
 ];
 
-const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onClose, onSave }) => {
+const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, aggregationLevel, onClose, onSave }) => {
   const [fieldData, setFieldData] = useState<UDFField>({
     name: '',
     type: 'string',
@@ -88,6 +93,12 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
     enum_values: undefined,
   });
 
+  // Add states for dynamic calculations
+  const [availableCalculations, setAvailableCalculations] = useState<CalculationDefinition[]>([]);
+  const [selectedCalculation, setSelectedCalculation] = useState<CalculationDefinition | null>(null);
+  const [loadingCalculations, setLoadingCalculations] = useState(false);
+
+  // Reset field data when dialog opens or field changes
   useEffect(() => {
     if (field) {
       setFieldData({ ...field });
@@ -105,6 +116,67 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
       });
     }
   }, [field]);
+
+  // Fetch available calculations when dialog opens and aggregation level is set
+  useEffect(() => {
+    const fetchCalculations = async () => {
+      if (open && aggregationLevel) {
+        try {
+          setLoadingCalculations(true);
+          const calculations = await getCalculationsForLevel(aggregationLevel);
+          setAvailableCalculations(calculations);
+        } catch (error) {
+          console.error('Failed to load calculations:', error);
+        } finally {
+          setLoadingCalculations(false);
+        }
+      }
+    };
+
+    fetchCalculations();
+  }, [open, aggregationLevel]);
+
+  // Update selected calculation when calculation type changes
+  useEffect(() => {
+    if (fieldData.calculation_type) {
+      const calculation = availableCalculations.find(calc => calc.type === fieldData.calculation_type);
+      setSelectedCalculation(calculation || null);
+    } else {
+      setSelectedCalculation(null);
+    }
+  }, [fieldData.calculation_type, availableCalculations]);
+
+  // Handle calculation type change
+  const handleCalculationTypeChange = (calcType: string) => {
+    const calculation = availableCalculations.find(calc => calc.type === calcType);
+    
+    // Initialize params with defaults from the calculation definition
+    const initialParams: Record<string, any> = {};
+    if (calculation?.params) {
+      calculation.params.forEach(param => {
+        if (param.default !== undefined) {
+          initialParams[param.name] = param.default;
+        }
+      });
+    }
+
+    setFieldData({ 
+      ...fieldData, 
+      calculation_type: calcType || undefined,
+      calculation_params: calcType ? initialParams : {}
+    });
+  };
+
+  // Handle parameter value change
+  const handleParamChange = (paramName: string, value: any) => {
+    setFieldData({
+      ...fieldData,
+      calculation_params: {
+        ...fieldData.calculation_params,
+        [paramName]: value
+      }
+    });
+  };
 
   const handleSave = () => {
     onSave(fieldData);
@@ -197,25 +269,86 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
                 <Select
                   value={fieldData.calculation_type || ''}
                   label="Calculation Type"
-                  onChange={(e) => setFieldData({ 
-                    ...fieldData, 
-                    calculation_type: e.target.value as CalculationType,
-                    calculation_params: e.target.value === 'custom' ? { formula: '' } : {}
-                  })}
+                  onChange={(e) => handleCalculationTypeChange(e.target.value)}
+                  disabled={loadingCalculations}
                 >
                   <MenuItem value="">
                     <em>None</em>
                   </MenuItem>
-                  {calculationTypes.map((calcType) => (
-                    <MenuItem key={calcType.value} value={calcType.value}>
-                      {calcType.label}
+                  {loadingCalculations ? (
+                    <MenuItem disabled>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <CircularProgress size={20} sx={{ mr: 1 }} /> Loading calculations...
+                      </Box>
                     </MenuItem>
-                  ))}
+                  ) : (
+                    availableCalculations.map((calc) => (
+                      <MenuItem key={calc.type} value={calc.type}>
+                        {calc.display_name}
+                      </MenuItem>
+                    ))
+                  )}
                 </Select>
+                {selectedCalculation?.description && (
+                  <FormHelperText>{selectedCalculation.description}</FormHelperText>
+                )}
               </FormControl>
             </Grid>
             
-            {fieldData.calculation_type === 'custom' && (
+            {/* Dynamic parameter fields based on selected calculation */}
+            {selectedCalculation?.params && selectedCalculation.params.length > 0 && (
+              <Grid item xs={12}>
+                <Box sx={{ mt: 2, mb: 1 }}>
+                  <Typography variant="subtitle2">Calculation Parameters</Typography>
+                </Box>
+                {selectedCalculation.params.map(param => (
+                  <Box key={param.name} sx={{ mb: 2 }}>
+                    {param.type === 'select' ? (
+                      <FormControl fullWidth required={param.required}>
+                        <InputLabel>{param.display_name}</InputLabel>
+                        <Select
+                          value={fieldData.calculation_params?.[param.name] || ''}
+                          label={param.display_name}
+                          onChange={(e) => handleParamChange(param.name, e.target.value)}
+                        >
+                          {param.options?.map(option => (
+                            <MenuItem key={option} value={option}>
+                              {option}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                        {param.description && (
+                          <FormHelperText>{param.description}</FormHelperText>
+                        )}
+                      </FormControl>
+                    ) : param.type === 'text' ? (
+                      <TextField
+                        fullWidth
+                        label={param.display_name}
+                        value={fieldData.calculation_params?.[param.name] || ''}
+                        onChange={(e) => handleParamChange(param.name, e.target.value)}
+                        multiline
+                        rows={3}
+                        required={param.required}
+                        helperText={param.description}
+                      />
+                    ) : (
+                      <TextField
+                        fullWidth
+                        label={param.display_name}
+                        value={fieldData.calculation_params?.[param.name] || ''}
+                        onChange={(e) => handleParamChange(param.name, e.target.value)}
+                        required={param.required}
+                        helperText={param.description}
+                      />
+                    )}
+                  </Box>
+                ))}
+              </Grid>
+            )}
+            
+            {/* Legacy custom formula field for backward compatibility */}
+            {fieldData.calculation_type === 'custom' && !selectedCalculation?.params && (
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -229,6 +362,53 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
                   rows={2}
                   helperText="Enter SQL-like formula, e.g., 'amount * 0.75' or 'MAX(amount, 1000)'"
                 />
+              </Grid>
+            )}
+
+            {/* Enhanced UI for the "mapping" calculation type */}
+            {selectedCalculation?.type === 'mapping' && (
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Mapping Type</InputLabel>
+                  <Select
+                    value={fieldData.calculation_params?.mapping_type || 'static'}
+                    label="Mapping Type"
+                    onChange={(e) => handleParamChange('mapping_type', e.target.value)}
+                  >
+                    <MenuItem value="static">Static Value</MenuItem>
+                    <MenuItem value="model_field">From Model Field</MenuItem>
+                  </Select>
+                  <FormHelperText>
+                    Choose static for a fixed value or model_field to map from another database table
+                  </FormHelperText>
+                </FormControl>
+                
+                {/* Static value input field */}
+                {fieldData.calculation_params?.mapping_type === 'static' && (
+                  <TextField
+                    fullWidth
+                    label="Static Value"
+                    value={fieldData.calculation_params?.mapping_value || ''}
+                    onChange={(e) => handleParamChange('mapping_value', e.target.value)}
+                    helperText="Enter the static value to store in this field"
+                    sx={{ mt: 2 }}
+                  />
+                )}
+                
+                {/* Fields for model mapping - only shown when "From Model Field" is selected */}
+                {fieldData.calculation_params?.mapping_type === 'model_field' && (
+                  <>
+                    <TextField
+                      fullWidth
+                      label="Relation Field"
+                      value={fieldData.calculation_params?.relation_field || ''}
+                      onChange={(e) => handleParamChange('relation_field', e.target.value)}
+                      helperText="Enter the field in the source model that contains the current record's ID (e.g., 'tranche_id')"
+                      required
+                      sx={{ mt: 2 }}
+                    />
+                  </>
+                )}
               </Grid>
             )}
             
@@ -655,6 +835,17 @@ const UdfBuilder: React.FC = () => {
               </FormHelperText>
             </FormControl>
           </Grid>
+          
+          {selectedBaseModel && (
+            <Grid item xs={12}>
+              <Box sx={{ mt: 1, bgcolor: '#f8f9fa', p: 2, borderRadius: 1, border: '1px solid #e0e0e0' }}>
+                <Typography variant="body2" color="text.secondary">
+                  <strong>Note:</strong> The primary key field from the base model will be automatically included in your UDF.
+                  You only need to define additional fields you want to include.
+                </Typography>
+              </Box>
+            </Grid>
+          )}
         </Grid>
 
         <Box sx={{ mt: 3 }}>
@@ -759,6 +950,7 @@ const UdfBuilder: React.FC = () => {
         open={fieldDialogOpen} 
         field={currentField} 
         modelFields={modelFields}
+        aggregationLevel={selectedAggregationLevel} // Pass aggregation level to FieldDialog
         onClose={() => setFieldDialogOpen(false)} 
         onSave={handleFieldSave} 
       />
