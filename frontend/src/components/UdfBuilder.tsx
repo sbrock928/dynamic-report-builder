@@ -10,7 +10,7 @@ import {
   MenuItem,
   InputLabel,
   FormControl,
-  IconButton,
+  FormHelperText,
   Snackbar,
   Alert,
   Dialog,
@@ -24,20 +24,37 @@ import {
 } from '@mui/material';
 import Form from '@rjsf/mui';
 import validator from '@rjsf/validator-ajv8';
-import { getSchemas, createSchema, updateSchema, deleteSchema, getPydanticCode } from '../api/api';
-import { Schema, SchemaField } from '../types';
+import { 
+  getUdfs, 
+  createUdf, 
+  updateUdf, 
+  deleteUdf, 
+  getPydanticCode,
+  getAvailableModels,
+  getModelFields
+} from '../api/api';
+import { 
+  UDF, 
+  UDFField, 
+  ModelInfo, 
+  ModelField,
+  CalculationType,
+  AggregationLevel
+} from '../types';
 
-interface SchemaBuilderFormSchema {
+interface UdfBuilderFormSchema {  // Changed from SchemaBuilderFormSchema
   name: string;
   description?: string;
-  fields: SchemaField[];
+  base_model: string;
+  aggregation_level: AggregationLevel;
+  fields: UDFField[];  // Changed from SchemaField
 }
-
 interface FieldDialogProps {
   open: boolean;
-  field: SchemaField | null;
+  field: UDFField | null;
+  modelFields: ModelField[];
   onClose: () => void;
-  onSave: (field: SchemaField) => void;
+  onSave: (field: UDFField) => void;
 }
 
 const fieldTypes = [
@@ -49,12 +66,24 @@ const fieldTypes = [
   { value: 'object', label: 'Object' },
 ];
 
-const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave }) => {
-  const [fieldData, setFieldData] = useState<SchemaField>({
+const calculationTypes = [
+  { value: 'sum', label: 'Sum' },
+  { value: 'average', label: 'Average' },
+  { value: 'count', label: 'Count' },
+  { value: 'min', label: 'Minimum' },
+  { value: 'max', label: 'Maximum' },
+  { value: 'custom', label: 'Custom Formula' },
+];
+
+const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onClose, onSave }) => {
+  const [fieldData, setFieldData] = useState<UDFField>({
     name: '',
     type: 'string',
     description: '',
     required: false,
+    source_field: undefined,
+    calculation_type: undefined,
+    calculation_params: {},
     default: undefined,
     enum_values: undefined,
   });
@@ -68,6 +97,9 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
         type: 'string',
         description: '',
         required: false,
+        source_field: undefined,
+        calculation_type: undefined,
+        calculation_params: {},
         default: undefined,
         enum_values: undefined,
       });
@@ -121,6 +153,7 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 />
               </FormGroup>
             </Grid>
+            
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -131,6 +164,80 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 rows={2}
               />
             </Grid>
+            
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }}>
+                <Typography variant="subtitle2">Calculation Settings</Typography>
+              </Divider>
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Source Field</InputLabel>
+                <Select
+                  value={fieldData.source_field || ''}
+                  label="Source Field"
+                  onChange={(e) => setFieldData({ ...fieldData, source_field: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {modelFields.map((modelField) => (
+                    <MenuItem key={modelField.name} value={modelField.name}>
+                      {modelField.name} ({modelField.type})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Calculation Type</InputLabel>
+                <Select
+                  value={fieldData.calculation_type || ''}
+                  label="Calculation Type"
+                  onChange={(e) => setFieldData({ 
+                    ...fieldData, 
+                    calculation_type: e.target.value as CalculationType,
+                    calculation_params: e.target.value === 'custom' ? { formula: '' } : {}
+                  })}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {calculationTypes.map((calcType) => (
+                    <MenuItem key={calcType.value} value={calcType.value}>
+                      {calcType.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            {fieldData.calculation_type === 'custom' && (
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Custom Formula"
+                  value={fieldData.calculation_params?.formula || ''}
+                  onChange={(e) => setFieldData({ 
+                    ...fieldData, 
+                    calculation_params: { ...fieldData.calculation_params, formula: e.target.value } 
+                  })}
+                  multiline
+                  rows={2}
+                  helperText="Enter SQL-like formula, e.g., 'amount * 0.75' or 'MAX(amount, 1000)'"
+                />
+              </Grid>
+            )}
+            
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }}>
+                <Typography variant="subtitle2">Additional Settings</Typography>
+              </Divider>
+            </Grid>
+            
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -139,6 +246,7 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
                 onChange={(e) => setFieldData({ ...fieldData, default: e.target.value })}
               />
             </Grid>
+            
             {fieldData.type === 'string' && (
               <Grid item xs={12}>
                 <TextField
@@ -168,96 +276,144 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, onClose, onSave 
   );
 };
 
-const SchemaBuilder: React.FC = () => {
-  const [schemas, setSchemas] = useState<Schema[]>([]);
-  const [selectedSchema, setSelectedSchema] = useState<Schema | null>(null);
+const UdfBuilder: React.FC = () => {
+  const [udfs, setUdfs] = useState<UDF[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelFields, setModelFields] = useState<ModelField[]>([]);
+  const [selectedUdf, setSelectedUdf] = useState<UDF | null>(null);
   const [isCreating, setIsCreating] = useState(true);
-  const [schemaName, setSchemaName] = useState('');
-  const [schemaDescription, setSchemaDescription] = useState('');
-  const [fields, setFields] = useState<SchemaField[]>([]);
+  const [udfName, setUdfName] = useState('');
+  const [udfDescription, setUdfDescription] = useState('');
+  const [selectedBaseModel, setSelectedBaseModel] = useState('');
+  const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
+  const [fields, setFields] = useState<UDFField[]>([]);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
-  const [currentField, setCurrentField] = useState<SchemaField | null>(null);
+  const [currentField, setCurrentField] = useState<UDFField | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [pydanticCode, setPydanticCode] = useState('');
   const [codeDialogOpen, setCodeDialogOpen] = useState(false);
 
   useEffect(() => {
-    loadSchemas();
+    loadData();
   }, []);
 
-  const loadSchemas = async () => {
+  const loadData = async () => {
     try {
-      const loadedSchemas = await getSchemas();
-      setSchemas(loadedSchemas);
+      const [loadedUdfs, loadedModels] = await Promise.all([
+        getUdfs(),
+        getAvailableModels()
+      ]);
+      setUdfs(loadedUdfs);
+      setModels(loadedModels);
     } catch (error) {
-      console.error('Failed to load schemas:', error);
-      setSnackbarMessage('Failed to load schemas');
+      console.error('Failed to load data:', error);
+      setSnackbarMessage('Failed to load data');
       setSnackbarOpen(true);
     }
   };
 
-  const handleSchemaSelect = async (schemaId: number) => {
-    const schema = schemas.find((s) => s.id === schemaId);
-    if (schema) {
-      setSelectedSchema(schema);
-      setSchemaName(schema.name);
-      setSchemaDescription(schema.description || '');
-      setFields(schema.schema_json.fields || []);
-      setIsCreating(false);
+  const loadModelFields = async (modelId: string) => {
+    try {
+      const fields = await getModelFields(modelId);
+      setModelFields(fields);
+    } catch (error) {
+      console.error('Failed to load model fields:', error);
+      setSnackbarMessage('Failed to load model fields');
+      setSnackbarOpen(true);
     }
   };
 
-  const handleNewSchema = () => {
-    setSelectedSchema(null);
-    setSchemaName('');
-    setSchemaDescription('');
+  const handleUdfSelect = async (udfId: number) => {
+    const udf = udfs.find((s) => s.id === udfId);
+    if (udf) {
+      setSelectedUdf(udf);
+      setUdfName(udf.name);
+      setUdfDescription(udf.description || '');
+      setSelectedBaseModel(udf.base_model);
+      setSelectedAggregationLevel(udf.aggregation_level);
+      setFields(udf.fields || []);
+      setIsCreating(false);
+      
+      // Load model fields for the selected base model
+      if (udf.base_model) {
+        await loadModelFields(udf.base_model);
+      }
+    }
+  };
+
+  const handleBaseModelChange = async (modelId: string) => {
+    setSelectedBaseModel(modelId);
+    await loadModelFields(modelId);
+  };
+
+  const handleNewUdf = () => {
+    setSelectedUdf(null);
+    setUdfName('');
+    setUdfDescription('');
+    setSelectedBaseModel('');
+    setSelectedAggregationLevel('');
     setFields([]);
+    setModelFields([]);
     setIsCreating(true);
   };
 
-  const handleSaveSchema = async () => {
+  const handleSaveUdf = async () => {
     try {
-      const schemaData: SchemaBuilderFormSchema = {
-        name: schemaName,
-        description: schemaDescription,
+      if (!selectedBaseModel) {
+        setSnackbarMessage('Please select a base model');
+        setSnackbarOpen(true);
+        return;
+      }
+      
+      if (!selectedAggregationLevel) {
+        setSnackbarMessage('Please select an aggregation level');
+        setSnackbarOpen(true);
+        return;
+      }
+      
+      const udfData: UdfBuilderFormSchema = {
+        name: udfName,
+        description: udfDescription,
+        base_model: selectedBaseModel,
+        aggregation_level: selectedAggregationLevel as AggregationLevel,
         fields: fields,
       };
 
-      let savedSchema;
+      let savedUdf;
       if (isCreating) {
-        savedSchema = await createSchema(schemaData);
-        setSnackbarMessage('Schema created successfully');
-      } else if (selectedSchema) {
-        savedSchema = await updateSchema(selectedSchema.id, schemaData);
-        setSnackbarMessage('Schema updated successfully');
+        savedUdf = await createUdf(udfData);
+        setSnackbarMessage('UDF created successfully');
+      } else if (selectedUdf) {
+        savedUdf = await updateUdf(selectedUdf.id, udfData);
+        setSnackbarMessage('UDF updated successfully');
       }
 
       setSnackbarOpen(true);
-      loadSchemas();
+      loadData();
 
-      if (savedSchema) {
-        setSelectedSchema(savedSchema);
+      if (savedUdf) {
+        setSelectedUdf(savedUdf);
         setIsCreating(false);
       }
     } catch (error) {
-      console.error('Failed to save schema:', error);
-      setSnackbarMessage('Failed to save schema');
+      console.error('Failed to save UDF:', error);
+      setSnackbarMessage('Failed to save UDF');
       setSnackbarOpen(true);
     }
   };
 
-  const handleDeleteSchema = async () => {
-    if (selectedSchema && window.confirm('Are you sure you want to delete this schema?')) {
+  const handleDeleteUdf = async () => {
+    if (selectedUdf && window.confirm('Are you sure you want to delete this UDF?')) {
       try {
-        await deleteSchema(selectedSchema.id);
-        setSnackbarMessage('Schema deleted successfully');
+        await deleteUdf(selectedUdf.id);
+        setSnackbarMessage('UDF deleted successfully');
         setSnackbarOpen(true);
-        loadSchemas();
-        handleNewSchema();
+        loadData();
+        handleNewUdf();
       } catch (error) {
-        console.error('Failed to delete schema:', error);
-        setSnackbarMessage('Failed to delete schema');
+        console.error('Failed to delete UDF:', error);
+        setSnackbarMessage('Failed to delete UDF');
         setSnackbarOpen(true);
       }
     }
@@ -279,7 +435,7 @@ const SchemaBuilder: React.FC = () => {
     setFields(newFields);
   };
 
-  const handleFieldSave = (field: SchemaField) => {
+  const handleFieldSave = (field: UDFField) => {
     if (currentField) {
       // Edit existing field
       const index = fields.findIndex((f) => f.name === currentField.name);
@@ -296,9 +452,9 @@ const SchemaBuilder: React.FC = () => {
   };
 
   const handleShowPydanticCode = async () => {
-    if (selectedSchema) {
+    if (selectedUdf) {
       try {
-        const code = await getPydanticCode(selectedSchema.id);
+        const code = await getPydanticCode(selectedUdf.id);
         setPydanticCode(code);
         setCodeDialogOpen(true);
       } catch (error) {
@@ -354,6 +510,19 @@ const SchemaBuilder: React.FC = () => {
         fieldSchema.enum = field.enum_values;
       }
 
+      // Add calculation info to description if available
+      if (field.calculation_type) {
+        const calcDesc = field.source_field 
+          ? `Calculation: ${field.calculation_type} of ${field.source_field}` 
+          : `Calculation: ${field.calculation_type}`;
+        
+        if (fieldSchema.description) {
+          fieldSchema.description += ` (${calcDesc})`;
+        } else {
+          fieldSchema.description = calcDesc;
+        }
+      }
+
       properties[field.name] = fieldSchema;
 
       if (field.required) {
@@ -371,26 +540,26 @@ const SchemaBuilder: React.FC = () => {
   return (
     <Box sx={{ p: 3, maxWidth: '100%' }}>
       <Typography variant="h4" gutterBottom>
-        Schema Builder
+        UDF Builder
       </Typography>
 
       <Box sx={{ mb: 3 }}>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth>
-              <InputLabel id="schema-select-label">Select Schema</InputLabel>
+              <InputLabel id="udf-select-label">Select UDF</InputLabel>
               <Select
-                labelId="schema-select-label"
-                value={selectedSchema ? selectedSchema.id : ''}
-                label="Select Schema"
-                onChange={(e) => handleSchemaSelect(Number(e.target.value))}
+                labelId="udf-select-label"
+                value={selectedUdf ? selectedUdf.id : ''}
+                label="Select UDF"
+                onChange={(e) => handleUdfSelect(Number(e.target.value))}
               >
                 <MenuItem value="">
                   <em>None</em>
                 </MenuItem>
-                {schemas.map((schema) => (
-                  <MenuItem key={schema.id} value={schema.id}>
-                    {schema.name}
+                {udfs.map((udf) => (
+                  <MenuItem key={udf.id} value={udf.id}>
+                    {udf.name} ({udf.aggregation_level} level)
                   </MenuItem>
                 ))}
               </Select>
@@ -398,12 +567,12 @@ const SchemaBuilder: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6}>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button variant="contained" color="primary" onClick={handleNewSchema}>
-                New Schema
+              <Button variant="contained" color="primary" onClick={handleNewUdf}>
+                New UDF
               </Button>
-              {selectedSchema && (
+              {selectedUdf && (
                 <>
-                  <Button variant="outlined" color="error" onClick={handleDeleteSchema}>
+                  <Button variant="outlined" color="error" onClick={handleDeleteUdf}>
                     Delete
                   </Button>
                   <Button variant="outlined" onClick={handleShowPydanticCode}>
@@ -418,15 +587,15 @@ const SchemaBuilder: React.FC = () => {
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Schema Definition
+          UDF Definition
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
-              label="Schema Name"
-              value={schemaName}
-              onChange={(e) => setSchemaName(e.target.value)}
+              label="UDF Name"
+              value={udfName}
+              onChange={(e) => setUdfName(e.target.value)}
               margin="normal"
             />
           </Grid>
@@ -434,24 +603,76 @@ const SchemaBuilder: React.FC = () => {
             <TextField
               fullWidth
               label="Description"
-              value={schemaDescription}
-              onChange={(e) => setSchemaDescription(e.target.value)}
+              value={udfDescription}
+              onChange={(e) => setUdfDescription(e.target.value)}
               margin="normal"
               multiline
               rows={1}
             />
+          </Grid>
+          <Grid item xs={12}>
+            <FormControl fullWidth margin="normal">
+              <InputLabel id="base-model-label">Base Model</InputLabel>
+              <Select
+                labelId="base-model-label"
+                value={selectedBaseModel}
+                label="Base Model"
+                onChange={(e) => handleBaseModelChange(e.target.value)}
+                disabled={!isCreating && selectedUdf !== null}
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {models.map((model) => (
+                  <MenuItem key={model.id} value={model.id}>
+                    {model.name} {model.description ? `- ${model.description}` : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12}>
+            <FormControl fullWidth margin="normal" required>
+              <InputLabel id="aggregation-level-label">Aggregation Level</InputLabel>
+              <Select
+                labelId="aggregation-level-label"
+                value={selectedAggregationLevel}
+                label="Aggregation Level"
+                onChange={(e) => setSelectedAggregationLevel(e.target.value as AggregationLevel)}
+                disabled={!isCreating && selectedUdf !== null} // Only disable when editing an existing UDF
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                <MenuItem value="deal">Deal Level</MenuItem>
+                <MenuItem value="group">Group Level</MenuItem>
+                <MenuItem value="tranche">Tranche Level</MenuItem>
+              </Select>
+              <FormHelperText>
+                Defines the granularity of this UDF. Different aggregation levels can be based on the same model.
+              </FormHelperText>
+            </FormControl>
           </Grid>
         </Grid>
 
         <Box sx={{ mt: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">Fields</Typography>
-            <Button variant="contained" color="primary" onClick={handleAddField}>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              onClick={handleAddField}
+              disabled={!selectedBaseModel}
+            >
               Add Field
             </Button>
           </Box>
           {fields.length === 0 ? (
-            <Typography color="text.secondary">No fields defined yet. Click "Add Field" to start.</Typography>
+            <Typography color="text.secondary">
+              {!selectedBaseModel 
+                ? "Select a base model first, then add fields." 
+                : "No fields defined yet. Click \"Add Field\" to start."}
+            </Typography>
           ) : (
             <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
               <Box component="thead">
@@ -466,7 +687,10 @@ const SchemaBuilder: React.FC = () => {
                     Required
                   </Box>
                   <Box component="th" sx={{ textAlign: 'left', p: 1 }}>
-                    Description
+                    Calculation
+                  </Box>
+                  <Box component="th" sx={{ textAlign: 'left', p: 1 }}>
+                    Source Field
                   </Box>
                   <Box component="th" sx={{ textAlign: 'right', p: 1 }}>
                     Actions
@@ -486,7 +710,10 @@ const SchemaBuilder: React.FC = () => {
                       {field.required ? 'Yes' : 'No'}
                     </Box>
                     <Box component="td" sx={{ p: 1 }}>
-                      {field.description || '-'}
+                      {field.calculation_type || '-'}
+                    </Box>
+                    <Box component="td" sx={{ p: 1 }}>
+                      {field.source_field || '-'}
                     </Box>
                     <Box component="td" sx={{ p: 1, textAlign: 'right' }}>
                       <Button size="small" onClick={() => handleEditField(index)}>
@@ -504,8 +731,13 @@ const SchemaBuilder: React.FC = () => {
         </Box>
 
         <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" color="primary" onClick={handleSaveSchema} disabled={!schemaName || fields.length === 0}>
-            {isCreating ? 'Create Schema' : 'Update Schema'}
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={handleSaveUdf} 
+            disabled={!udfName || !selectedBaseModel || !selectedAggregationLevel || fields.length === 0}
+          >
+            {isCreating ? 'Create UDF' : 'Update UDF'}
           </Button>
         </Box>
       </Paper>
@@ -520,10 +752,16 @@ const SchemaBuilder: React.FC = () => {
         </Paper>
       )}
 
-      <FieldDialog open={fieldDialogOpen} field={currentField} onClose={() => setFieldDialogOpen(false)} onSave={handleFieldSave} />
+      <FieldDialog 
+        open={fieldDialogOpen} 
+        field={currentField} 
+        modelFields={modelFields}
+        onClose={() => setFieldDialogOpen(false)} 
+        onSave={handleFieldSave} 
+      />
 
       <Dialog open={codeDialogOpen} onClose={() => setCodeDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Pydantic Model Code</DialogTitle>
+        <DialogTitle>Pydantic Model Code for UDF</DialogTitle>
         <DialogContent>
           <Box component="pre" sx={{ backgroundColor: '#f5f5f5', p: 2, borderRadius: 1, overflowX: 'auto' }}>
             <Box component="code">{pydanticCode}</Box>
@@ -556,4 +794,4 @@ const SchemaBuilder: React.FC = () => {
   );
 };
 
-export default SchemaBuilder;
+export default UdfBuilder;

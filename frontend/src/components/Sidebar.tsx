@@ -9,7 +9,7 @@ const Sidebar: React.FC = () => {
     <Box sx={{ width: 240, borderRight: '1px solid #ddd', height: '100vh' }}>
       <Box sx={{ p: 2 }}>
         <Typography variant="h6" component="div">
-          Schema & Report Builder
+          UDF & Report Builder
         </Typography>
       </Box>
       <Divider />
@@ -20,7 +20,7 @@ const Sidebar: React.FC = () => {
             to="/" 
             selected={location.pathname === '/'}
           >
-            <ListItemText primary="Schema Builder" />
+            <ListItemText primary="UDF Builder" />
           </ListItemButton>
         </ListItem>
         <ListItem disablePadding>
