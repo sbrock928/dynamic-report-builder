@@ -2,8 +2,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import Base, engine, seed_sample_data
-from routes import udf, report, models  # Updated import
+from common.database import Base, engine, seed_sample_data
+from udf.routes import router as udf_router
+from report.routes import router as report_router
+from common.models import router as models_router
+from common.financial_models import Deal, Tranche, CashFlow
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
@@ -23,9 +26,10 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(udf.router)  # Updated router
-app.include_router(report.router)
-app.include_router(models.router)
+app.include_router(udf_router)
+app.include_router(report_router)
+app.include_router(models_router)
+
 
 @app.get("/")
 def read_root():
