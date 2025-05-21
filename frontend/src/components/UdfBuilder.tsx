@@ -11,7 +11,6 @@ import {
   InputLabel,
   FormControl,
   FormHelperText,
-  IconButton,
   Snackbar,
   Alert,
   Dialog,
@@ -26,37 +25,36 @@ import {
 import Form from '@rjsf/mui';
 import validator from '@rjsf/validator-ajv8';
 import { 
-  getSchemas, 
-  createSchema, 
-  updateSchema, 
-  deleteSchema, 
+  getUdfs, 
+  createUdf, 
+  updateUdf, 
+  deleteUdf, 
   getPydanticCode,
   getAvailableModels,
   getModelFields
 } from '../api/api';
 import { 
-  Schema, 
-  SchemaField, 
+  UDF, 
+  UDFField, 
   ModelInfo, 
   ModelField,
   CalculationType,
   AggregationLevel
 } from '../types';
 
-interface SchemaBuilderFormSchema {
+interface UdfBuilderFormSchema {  // Changed from SchemaBuilderFormSchema
   name: string;
   description?: string;
   base_model: string;
   aggregation_level: AggregationLevel;
-  fields: SchemaField[];
+  fields: UDFField[];  // Changed from SchemaField
 }
-
 interface FieldDialogProps {
   open: boolean;
-  field: SchemaField | null;
+  field: UDFField | null;
   modelFields: ModelField[];
   onClose: () => void;
-  onSave: (field: SchemaField) => void;
+  onSave: (field: UDFField) => void;
 }
 
 const fieldTypes = [
@@ -78,7 +76,7 @@ const calculationTypes = [
 ];
 
 const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onClose, onSave }) => {
-  const [fieldData, setFieldData] = useState<SchemaField>({
+  const [fieldData, setFieldData] = useState<UDFField>({
     name: '',
     type: 'string',
     description: '',
@@ -279,18 +277,18 @@ const FieldDialog: React.FC<FieldDialogProps> = ({ open, field, modelFields, onC
 };
 
 const UdfBuilder: React.FC = () => {
-  const [udfs, setUdfs] = useState<Schema[]>([]);
+  const [udfs, setUdfs] = useState<UDF[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelFields, setModelFields] = useState<ModelField[]>([]);
-  const [selectedUdf, setSelectedUdf] = useState<Schema | null>(null);
+  const [selectedUdf, setSelectedUdf] = useState<UDF | null>(null);
   const [isCreating, setIsCreating] = useState(true);
   const [udfName, setUdfName] = useState('');
   const [udfDescription, setUdfDescription] = useState('');
   const [selectedBaseModel, setSelectedBaseModel] = useState('');
   const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
-  const [fields, setFields] = useState<SchemaField[]>([]);
+  const [fields, setFields] = useState<UDFField[]>([]);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
-  const [currentField, setCurrentField] = useState<SchemaField | null>(null);
+  const [currentField, setCurrentField] = useState<UDFField | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [pydanticCode, setPydanticCode] = useState('');
@@ -303,7 +301,7 @@ const UdfBuilder: React.FC = () => {
   const loadData = async () => {
     try {
       const [loadedUdfs, loadedModels] = await Promise.all([
-        getSchemas(),
+        getUdfs(),
         getAvailableModels()
       ]);
       setUdfs(loadedUdfs);
@@ -374,7 +372,7 @@ const UdfBuilder: React.FC = () => {
         return;
       }
       
-      const udfData: SchemaBuilderFormSchema = {
+      const udfData: UdfBuilderFormSchema = {
         name: udfName,
         description: udfDescription,
         base_model: selectedBaseModel,
@@ -384,10 +382,10 @@ const UdfBuilder: React.FC = () => {
 
       let savedUdf;
       if (isCreating) {
-        savedUdf = await createSchema(udfData);
+        savedUdf = await createUdf(udfData);
         setSnackbarMessage('UDF created successfully');
       } else if (selectedUdf) {
-        savedUdf = await updateSchema(selectedUdf.id, udfData);
+        savedUdf = await updateUdf(selectedUdf.id, udfData);
         setSnackbarMessage('UDF updated successfully');
       }
 
@@ -408,7 +406,7 @@ const UdfBuilder: React.FC = () => {
   const handleDeleteUdf = async () => {
     if (selectedUdf && window.confirm('Are you sure you want to delete this UDF?')) {
       try {
-        await deleteSchema(selectedUdf.id);
+        await deleteUdf(selectedUdf.id);
         setSnackbarMessage('UDF deleted successfully');
         setSnackbarOpen(true);
         loadData();
@@ -437,7 +435,7 @@ const UdfBuilder: React.FC = () => {
     setFields(newFields);
   };
 
-  const handleFieldSave = (field: SchemaField) => {
+  const handleFieldSave = (field: UDFField) => {
     if (currentField) {
       // Edit existing field
       const index = fields.findIndex((f) => f.name === currentField.name);

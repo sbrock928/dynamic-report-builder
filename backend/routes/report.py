@@ -7,10 +7,11 @@ from sqlalchemy import text
 from database import get_db
 from schemas.report import ReportLayout, ReportLayoutCreate, ReportLayoutUpdate, ReportDataRequest, ReportDataResponse
 from models.report import ReportLayout as ReportLayoutModel
-from models.schema import SchemaModel
+from models.udf import UDFModel  # Updated from SchemaModel
 from model_registry import get_model_class, get_model_fields
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
 
 @router.get("/cycles", response_model=List[str])
 def get_cycle_codes():
@@ -19,6 +20,7 @@ def get_cycle_codes():
     # In a real system, these would typically come from a database
     return ["12023", "12022", "12201"]
 
+
 @router.get("/", response_model=List[ReportLayout])
 def get_report_layouts(db: Session = Depends(get_db)):
     """Get all report layouts"""
@@ -26,8 +28,8 @@ def get_report_layouts(db: Session = Depends(get_db)):
     
     result = []
     for layout in layouts:
-        # Convert to Pydantic model with schema_ids
-        schema_ids = [schema.id for schema in layout.schemas]
+        # Convert to Pydantic model with udf_ids
+        udf_ids = [udf.id for udf in layout.udfs]  # Updated from schemas to udfs
         
         result.append(ReportLayout(
             id=layout.id,
@@ -35,7 +37,7 @@ def get_report_layouts(db: Session = Depends(get_db)):
             description=layout.description,
             primary_model=layout.primary_model,
             aggregation_level=layout.aggregation_level,
-            schema_ids=schema_ids,
+            udf_ids=udf_ids,  # Updated from schema_ids to udf_ids
             layout_json=layout.layout_json
         ))
     
@@ -48,8 +50,8 @@ def get_report_layout(report_id: int, db: Session = Depends(get_db)):
     if layout is None:
         raise HTTPException(status_code=404, detail="Report layout not found")
     
-    # Convert to Pydantic model with schema_ids
-    schema_ids = [schema.id for schema in layout.schemas]
+    # Convert to Pydantic model with udf_ids
+    udf_ids = [udf.id for udf in layout.udfs]  # Updated from schemas to udfs
     
     return ReportLayout(
         id=layout.id,
@@ -57,7 +59,7 @@ def get_report_layout(report_id: int, db: Session = Depends(get_db)):
         description=layout.description,
         primary_model=layout.primary_model,
         aggregation_level=layout.aggregation_level,
-        schema_ids=schema_ids,
+        udf_ids=udf_ids,  # Updated from schema_ids to udf_ids
         layout_json=layout.layout_json
     )
 
@@ -73,21 +75,21 @@ def create_report_layout(layout_create: ReportLayoutCreate, db: Session = Depend
     if not layout_create.aggregation_level:
         raise HTTPException(status_code=400, detail="Aggregation level is required")
     
-    # Check if schemas exist and are compatible with the aggregation level
-    schemas = []
-    for schema_id in layout_create.schema_ids:
-        schema = db.query(SchemaModel).filter(SchemaModel.id == schema_id).first()
-        if schema is None:
-            raise HTTPException(status_code=404, detail=f"Schema with ID {schema_id} not found")
+    # Check if UDFs exist and are compatible with the aggregation level
+    udfs = []  # Updated from schemas to udfs
+    for udf_id in layout_create.udf_ids:  # Updated from schema_ids to udf_ids
+        udf = db.query(UDFModel).filter(UDFModel.id == udf_id).first()  # Updated from SchemaModel to UDFModel
+        if udf is None:
+            raise HTTPException(status_code=404, detail=f"UDF with ID {udf_id} not found")
         
-        # Ensure schema aggregation level matches report aggregation level
-        if schema.aggregation_level != layout_create.aggregation_level:
+        # Ensure UDF aggregation level matches report aggregation level
+        if udf.aggregation_level != layout_create.aggregation_level:
             raise HTTPException(
                 status_code=400,
-                detail=f"Schema with ID {schema_id} has aggregation level '{schema.aggregation_level}' which is incompatible with report aggregation level '{layout_create.aggregation_level}'"
+                detail=f"UDF with ID {udf_id} has aggregation level '{udf.aggregation_level}' which is incompatible with report aggregation level '{layout_create.aggregation_level}'"
             )
         
-        schemas.append(schema)
+        udfs.append(udf)
     
     # Create the report layout
     db_layout = ReportLayoutModel(
@@ -98,16 +100,16 @@ def create_report_layout(layout_create: ReportLayoutCreate, db: Session = Depend
         layout_json=layout_create.layout_json
     )
     
-    # Add schemas to the report
-    for schema in schemas:
-        db_layout.schemas.append(schema)
+    # Add UDFs to the report
+    for udf in udfs:  # Updated from schemas to udfs
+        db_layout.udfs.append(udf)  # Updated from schemas to udfs
     
     db.add(db_layout)
     db.commit()
     db.refresh(db_layout)
     
-    # Convert to Pydantic model with schema_ids
-    schema_ids = [schema.id for schema in db_layout.schemas]
+    # Convert to Pydantic model with udf_ids
+    udf_ids = [udf.id for udf in db_layout.udfs]  # Updated from schemas to udfs
     
     return ReportLayout(
         id=db_layout.id,
@@ -115,7 +117,7 @@ def create_report_layout(layout_create: ReportLayoutCreate, db: Session = Depend
         description=db_layout.description,
         primary_model=db_layout.primary_model,
         aggregation_level=db_layout.aggregation_level,
-        schema_ids=schema_ids,
+        udf_ids=udf_ids,  # Updated from schema_ids to udf_ids
         layout_json=db_layout.layout_json
     )
 
@@ -136,21 +138,21 @@ def update_report_layout(report_id: int, layout_update: ReportLayoutUpdate, db: 
     if not layout_update.aggregation_level:
         raise HTTPException(status_code=400, detail="Aggregation level is required")
     
-    # Check if schemas exist and are compatible with the aggregation level
-    schemas = []
-    for schema_id in layout_update.schema_ids:
-        schema = db.query(SchemaModel).filter(SchemaModel.id == schema_id).first()
-        if schema is None:
-            raise HTTPException(status_code=404, detail=f"Schema with ID {schema_id} not found")
+    # Check if UDFs exist and are compatible with the aggregation level
+    udfs = []  # Updated from schemas to udfs
+    for udf_id in layout_update.udf_ids:  # Updated from schema_ids to udf_ids
+        udf = db.query(UDFModel).filter(UDFModel.id == udf_id).first()  # Updated from SchemaModel to UDFModel
+        if udf is None:
+            raise HTTPException(status_code=404, detail=f"UDF with ID {udf_id} not found")
         
-        # Ensure schema aggregation level matches report aggregation level
-        if schema.aggregation_level != layout_update.aggregation_level:
+        # Ensure UDF aggregation level matches report aggregation level
+        if udf.aggregation_level != layout_update.aggregation_level:
             raise HTTPException(
                 status_code=400,
-                detail=f"Schema with ID {schema_id} has aggregation level '{schema.aggregation_level}' which is incompatible with report aggregation level '{layout_update.aggregation_level}'"
+                detail=f"UDF with ID {udf_id} has aggregation level '{udf.aggregation_level}' which is incompatible with report aggregation level '{layout_update.aggregation_level}'"
             )
         
-        schemas.append(schema)
+        udfs.append(udf)
     
     # Update the report layout
     db_layout.name = layout_update.name
@@ -159,16 +161,16 @@ def update_report_layout(report_id: int, layout_update: ReportLayoutUpdate, db: 
     db_layout.aggregation_level = layout_update.aggregation_level
     db_layout.layout_json = layout_update.layout_json
     
-    # Clear existing schemas and add updated ones
-    db_layout.schemas = []
-    for schema in schemas:
-        db_layout.schemas.append(schema)
+    # Clear existing UDFs and add updated ones
+    db_layout.udfs = []  # Updated from schemas to udfs
+    for udf in udfs:  # Updated from schemas to udfs
+        db_layout.udfs.append(udf)  # Updated from schemas to udfs
     
     db.commit()
     db.refresh(db_layout)
     
-    # Convert to Pydantic model with schema_ids
-    schema_ids = [schema.id for schema in db_layout.schemas]
+    # Convert to Pydantic model with udf_ids
+    udf_ids = [udf.id for udf in db_layout.udfs]  # Updated from schemas to udfs
     
     return ReportLayout(
         id=db_layout.id,
@@ -176,7 +178,7 @@ def update_report_layout(report_id: int, layout_update: ReportLayoutUpdate, db: 
         description=db_layout.description,
         primary_model=db_layout.primary_model,
         aggregation_level=db_layout.aggregation_level,
-        schema_ids=schema_ids,
+        udf_ids=udf_ids,  # Updated from schema_ids to udf_ids
         layout_json=db_layout.layout_json
     )
 
@@ -217,7 +219,7 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
     # Execute the base query
     base_results = base_query.all()
     
-    # Process results with UDFs from each schema
+    # Process results with UDFs from each UDF
     result_data = []
     for base_record in base_results:
         # Start with base record data
@@ -227,9 +229,9 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
         for column in primary_model_class.__table__.columns:
             record_data[column.name] = getattr(base_record, column.name)
         
-        # Apply UDFs from each schema
-        for schema in report_layout.schemas:
-            fields = schema.schema_json.get("fields", [])
+        # Apply UDFs from each UDF
+        for udf in report_layout.udfs:  # Updated from schemas to udfs
+            fields = udf.udf_json.get("fields", [])
             
             for field in fields:
                 # Only include fields that are part of the report layout
@@ -239,16 +241,16 @@ def run_report(request: ReportDataRequest, db: Session = Depends(get_db)):
                     udf_value = calculate_udf(
                         db,
                         base_record, 
-                        schema.base_model,
+                        udf.base_model,
                         field.get("source_field"),
                         field.get("calculation_type"),
                         field.get("calculation_params", {}),
                         request.cycle_code,
-                        schema.aggregation_level  # Pass the aggregation level for calculation
+                        udf.aggregation_level  # Pass the aggregation level for calculation
                     )
                     
-                    # Add to the record with schema prefix to avoid field name conflicts
-                    record_data[f"{schema.name}.{field_name}"] = udf_value
+                    # Add to the record with UDF prefix to avoid field name conflicts
+                    record_data[f"{udf.name}.{field_name}"] = udf_value
         
         result_data.append(record_data)
     
@@ -335,7 +337,12 @@ def calculate_udf(db, base_record, base_model, source_field, calculation_type, p
     # Default fallback
     return 0
 
-
+@router.get("/cycles", response_model=List[str])
+def get_cycle_codes():
+    """Get available cycle codes for reports"""
+    # For this example, we'll return predefined cycle codes
+    # In a real system, these would typically come from a database
+    return ["12023", "12022", "12201"]
 
 @router.get("/primary-models", response_model=List[Dict[str, Any]])
 def get_primary_models():

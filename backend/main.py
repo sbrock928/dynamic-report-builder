@@ -1,8 +1,9 @@
+# backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine, seed_sample_data
-from routes import schema, report, models
+from routes import udf, report, models  # Updated import
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
@@ -10,7 +11,7 @@ Base.metadata.create_all(bind=engine)
 # Seed sample data
 seed_sample_data()
 
-app = FastAPI(title="Dynamic Schema and Report Builder")
+app = FastAPI(title="UDF and Report Builder")
 
 # Configure CORS
 app.add_middleware(
@@ -22,10 +23,10 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(schema.router)
+app.include_router(udf.router)  # Updated router
 app.include_router(report.router)
 app.include_router(models.router)
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Dynamic Schema and Report Builder API"}
+    return {"message": "Welcome to the UDF and Report Builder API"}

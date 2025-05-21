@@ -1,6 +1,7 @@
+// frontend/src/types/index.ts
 export type AggregationLevel = 'deal' | 'group' | 'tranche';
 
-export interface SchemaField {
+export interface UDFField {
   name: string;
   type: string;
   description?: string;
@@ -13,22 +14,22 @@ export interface SchemaField {
   enum_values?: any[];
 }
 
-export interface Schema {
+export interface UDF {
   id: number;
   name: string;
   description?: string;
   base_model: string;
   aggregation_level: AggregationLevel;
-  fields: SchemaField[];
-  schema_json: Record<string, any>;
+  fields: UDFField[];
+  schema_json: Record<string, any>;  // Keeping this as schema_json for now
 }
 
-export interface SchemaCreate {
+export interface UDFCreate {
   name: string;
   description?: string;
   base_model: string;
   aggregation_level: AggregationLevel;
-  fields: SchemaField[];
+  fields: UDFField[];
 }
 
 export interface ReportLayout {
@@ -37,7 +38,7 @@ export interface ReportLayout {
   description?: string;
   primary_model: string;
   aggregation_level: AggregationLevel;
-  schema_ids: number[];
+  udf_ids: number[];  // Changed from schema_ids to udf_ids
   layout_json: Record<string, any>;
 }
 
@@ -46,7 +47,7 @@ export interface ReportLayoutCreate {
   description?: string;
   primary_model: string;
   aggregation_level: AggregationLevel;
-  schema_ids: number[];
+  udf_ids: number[];  // Changed from schema_ids to udf_ids
   layout_json: Record<string, any>;
 }
 
@@ -65,7 +66,6 @@ export interface ReportDataResponse {
 export interface ModelInfo {
   id: string;
   name: string;
-  aggregation_level: AggregationLevel;
   description?: string;
 }
 

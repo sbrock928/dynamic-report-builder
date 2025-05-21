@@ -9,7 +9,7 @@ class ReportLayoutBase(BaseModel):
     description: Optional[str] = None
     primary_model: str
     aggregation_level: AggregationLevel
-    schema_ids: List[int]
+    udf_ids: List[int]  # Renamed from schema_ids
     layout_json: Dict[str, Any]
 
 class ReportLayoutCreate(ReportLayoutBase):

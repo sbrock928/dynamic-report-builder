@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { 
-  Schema, 
-  SchemaCreate, 
+  UDF, 
+  UDFCreate, 
   ReportLayout, 
   ReportLayoutCreate,
   ReportDataRequest,
@@ -12,34 +12,34 @@ import {
 
 const API_URL = 'http://localhost:8000';
 
-// Schema API
-export const getSchemas = async (): Promise<Schema[]> => {
-  const response = await axios.get<Schema[]>(`${API_URL}/schemas/`);
+// UDF API
+export const getUdfs = async (): Promise<UDF[]> => {
+  const response = await axios.get<UDF[]>(`${API_URL}/udfs/`);
   return response.data;
 };
 
-export const getSchema = async (id: number): Promise<Schema> => {
-  const response = await axios.get<Schema>(`${API_URL}/schemas/${id}`);
+export const getUdf = async (id: number): Promise<UDF> => {
+  const response = await axios.get<UDF>(`${API_URL}/udfs/${id}`);
   return response.data;
 };
 
-export const createSchema = async (schema: SchemaCreate): Promise<Schema> => {
-  const response = await axios.post<Schema>(`${API_URL}/schemas/`, schema);
+export const createUdf = async (udf: UDFCreate): Promise<UDF> => {
+  const response = await axios.post<UDF>(`${API_URL}/udfs/`, udf);
   return response.data;
 };
 
-export const updateSchema = async (id: number, schema: SchemaCreate): Promise<Schema> => {
-  const response = await axios.put<Schema>(`${API_URL}/schemas/${id}`, schema);
+export const updateUdf = async (id: number, udf: UDFCreate): Promise<UDF> => {
+  const response = await axios.put<UDF>(`${API_URL}/udfs/${id}`, udf);
   return response.data;
 };
 
-export const deleteSchema = async (id: number): Promise<boolean> => {
-  const response = await axios.delete<boolean>(`${API_URL}/schemas/${id}`);
+export const deleteUdf = async (id: number): Promise<boolean> => {
+  const response = await axios.delete<boolean>(`${API_URL}/udfs/${id}`);
   return response.data;
 };
 
 export const getPydanticCode = async (id: number): Promise<string> => {
-  const response = await axios.get<string>(`${API_URL}/schemas/${id}/pydantic-code`);
+  const response = await axios.get<string>(`${API_URL}/udfs/${id}/pydantic-code`);
   return response.data;
 };
 

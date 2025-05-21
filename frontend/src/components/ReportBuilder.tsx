@@ -29,11 +29,10 @@ import {
   Divider,
   Chip,
   ListItemText,
-  Tooltip,
   OutlinedInput,
 } from '@mui/material';
 import {
-  getSchemas,
+  getUdfs,  // Updated from getSchemas
   getReportLayouts,
   createReportLayout,
   updateReportLayout,
@@ -42,7 +41,7 @@ import {
   getCycleCodes,
   getAvailableModels,
 } from '../api/api';
-import { Schema, ReportLayout, SchemaField, ModelInfo, AggregationLevel } from '../types';
+import { UDF, UDFField, ReportLayout, ModelInfo, AggregationLevel } from '../types';  // Updated from Schema to UDF
 
 const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
@@ -56,21 +55,20 @@ const MenuProps = {
 };
 
 const ReportBuilder: React.FC = () => {
-  const [schemas, setSchemas] = useState<Schema[]>([]);
+  const [udfs, setUdfs] = useState<UDF[]>([]);  // Updated from schemas to udfs
   const [reports, setReports] = useState<ReportLayout[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedReport, setSelectedReport] = useState<ReportLayout | null>(null);
   const [reportName, setReportName] = useState('');
   const [reportDescription, setReportDescription] = useState('');
   const [isCreating, setIsCreating] = useState(true);
-  const [selectedSchemaIds, setSelectedSchemaIds] = useState<number[]>([]);
+  const [selectedUdfIds, setSelectedUdfIds] = useState<number[]>([]);  
   const [selectedPrimaryModel, setSelectedPrimaryModel] = useState('');
   const [selectedAggregationLevel, setSelectedAggregationLevel] = useState<AggregationLevel | ''>('');
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [cycleCodes, setCycleCodes] = useState<string[]>([]);
   const [selectedCycleCode, setSelectedCycleCode] = useState('');
   const [reportData, setReportData] = useState<Record<string, any>[]>([]);
-  const [loading, setLoading] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [fieldSelectOpen, setFieldSelectOpen] = useState(false);
@@ -83,20 +81,20 @@ const ReportBuilder: React.FC = () => {
 
   // Debug effect to help identify issues
   useEffect(() => {
-    console.log('Available schemas:', schemas);
+    console.log('Available UDFs:', udfs);  // Updated from schemas to udfs
     console.log('Selected aggregation level:', selectedAggregationLevel);
-    console.log('Compatible schemas:', getCompatibleSchemas());
-  }, [schemas, selectedAggregationLevel]);
+    console.log('Compatible UDFs:', getCompatibleUdfs());  // Updated from getCompatibleSchemas
+  }, [udfs, selectedAggregationLevel]);  // Updated from schemas to udfs
 
   const loadData = async () => {
     try {
-      const [schemaData, reportData, cycleData, modelData] = await Promise.all([
-        getSchemas(),
+      const [udfData, reportData, cycleData, modelData] = await Promise.all([  // Updated from schemaData to udfData
+        getUdfs(),  // Updated from getSchemas
         getReportLayouts(),
         getCycleCodes(),
         getAvailableModels(),
       ]);
-      setSchemas(schemaData);
+      setUdfs(udfData);  // Updated from setSchemas to setUdfs
       setReports(reportData);
       setCycleCodes(cycleData);
       setModels(modelData);
@@ -110,24 +108,24 @@ const ReportBuilder: React.FC = () => {
     }
   };
 
-  const getCompatibleSchemas = () => {
+  const getCompatibleUdfs = () => {  // Updated from getCompatibleSchemas
     if (!selectedAggregationLevel) return [];
     
-    // Return schemas that match the selected aggregation level
-    return schemas.filter(schema => schema.aggregation_level === selectedAggregationLevel);
+    // Return UDFs that match the selected aggregation level
+    return udfs.filter(udf => udf.aggregation_level === selectedAggregationLevel);  // Updated from schemas to udfs
   };
 
   const handlePrimaryModelSelect = (modelId: string) => {
     setSelectedPrimaryModel(modelId);
-    // Reset selected schemas when primary model changes
-    setSelectedSchemaIds([]);
+    // Reset selected UDFs when primary model changes
+    setSelectedUdfIds([]);  // Updated from setSelectedSchemaIds
   };
 
-  const handleSchemaSelect = (event: React.ChangeEvent<{ value: unknown }>) => {
-    const schemaIds = event.target.value as number[];
-    setSelectedSchemaIds(schemaIds);
+  const handleUdfSelect = (event: React.ChangeEvent<{ value: unknown }>) => {  // Updated from handleSchemaSelect
+    const udfIds = event.target.value as number[];  // Updated from schemaIds
+    setSelectedUdfIds(udfIds);  // Updated from setSelectedSchemaIds
     
-    // Reset field selection when schemas change
+    // Reset field selection when UDFs change
     setSelectedFields([]);
   };
 
@@ -139,7 +137,7 @@ const ReportBuilder: React.FC = () => {
       setReportDescription(report.description || '');
       setSelectedPrimaryModel(report.primary_model);
       setSelectedAggregationLevel(report.aggregation_level);
-      setSelectedSchemaIds(report.schema_ids);
+      setSelectedUdfIds(report.udf_ids);  // Updated from schema_ids to udf_ids
       
       // Set the selected fields from the report layout
       const reportFields = report.layout_json.fields || [];
@@ -155,7 +153,7 @@ const ReportBuilder: React.FC = () => {
     setReportDescription('');
     setSelectedPrimaryModel('');
     setSelectedAggregationLevel('');
-    setSelectedSchemaIds([]);
+    setSelectedUdfIds([]);  // Updated from setSelectedSchemaIds
     setSelectedFields([]);
     setIsCreating(true);
     setReportData([]);
@@ -175,8 +173,8 @@ const ReportBuilder: React.FC = () => {
         return;
       }
 
-      if (selectedSchemaIds.length === 0) {
-        setSnackbarMessage('Please select at least one schema');
+      if (selectedUdfIds.length === 0) {  // Updated from selectedSchemaIds
+        setSnackbarMessage('Please select at least one UDF');  // Updated from schema to UDF
         setSnackbarOpen(true);
         return;
       }
@@ -186,7 +184,7 @@ const ReportBuilder: React.FC = () => {
         description: reportDescription,
         primary_model: selectedPrimaryModel,
         aggregation_level: selectedAggregationLevel as AggregationLevel,
-        schema_ids: selectedSchemaIds,
+        udf_ids: selectedUdfIds,  // Updated from schema_ids to udf_ids
         layout_json: {
           fields: selectedFields,
         },
@@ -265,12 +263,12 @@ const ReportBuilder: React.FC = () => {
   const handleSelectAllFields = () => {
     const allFields: string[] = [];
     
-    // Get fields from all selected schemas
-    selectedSchemaIds.forEach(schemaId => {
-      const schema = schemas.find(s => s.id === schemaId);
-      if (schema) {
-        schema.fields.forEach(field => {
-          allFields.push(`${schema.name}.${field.name}`);
+    // Get fields from all selected UDFs
+    selectedUdfIds.forEach(udfId => {  // Updated from schemaId to udfId
+      const udf = udfs.find(s => s.id === udfId);  // Updated from schema to udf
+      if (udf) {
+        udf.fields.forEach(field => {
+          allFields.push(`${udf.name}.${field.name}`);
         });
       }
     });
@@ -315,17 +313,17 @@ const ReportBuilder: React.FC = () => {
     setExportDialogOpen(false);
   };
 
-  // Get selected schemas
-  const getSelectedSchemas = () => {
-    return schemas.filter(schema => selectedSchemaIds.includes(schema.id));
+  // Get selected UDFs
+  const getSelectedUdfs = () => {  // Updated from getSelectedSchemas
+    return udfs.filter(udf => selectedUdfIds.includes(udf.id));  // Updated from schemas to udfs
   };
 
-  // Group fields by schema
-  const getFieldsBySchema = () => {
-    const fieldGroups: Record<string, SchemaField[]> = {};
+  // Group fields by UDF
+  const getFieldsByUdf = () => {  // Updated from getFieldsBySchema
+    const fieldGroups: Record<string, UDFField[]> = {};  // Updated from SchemaField to UDFField
     
-    getSelectedSchemas().forEach(schema => {
-      fieldGroups[schema.name] = schema.fields;
+    getSelectedUdfs().forEach(udf => {  // Updated from getSelectedSchemas
+      fieldGroups[udf.name] = udf.fields;
     });
     
     return fieldGroups;
@@ -440,26 +438,26 @@ const ReportBuilder: React.FC = () => {
                 <MenuItem value="tranche">Tranche Level</MenuItem>
               </Select>
               <FormHelperText>
-                Defines the granularity of this report. Only schemas with matching level can be included.
+                Defines the granularity of this report. Only UDFs with matching level can be included.
               </FormHelperText>
             </FormControl>
           </Grid>
           
           <Grid item xs={12}>
             <FormControl fullWidth margin="normal">
-              <InputLabel id="schemas-label">Schemas</InputLabel>
+              <InputLabel id="udfs-label">UDFs</InputLabel>
               <Select
-                labelId="schemas-label"
+                labelId="udfs-label"
                 multiple
-                value={selectedSchemaIds}
-                onChange={(e: any) => handleSchemaSelect(e)}
-                input={<OutlinedInput label="Schemas" />}
+                value={selectedUdfIds}
+                onChange={(e: any) => handleUdfSelect(e)}
+                input={<OutlinedInput label="UDFs" />}
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                    {(selected as number[]).map((schemaId) => {
-                      const schema = schemas.find(s => s.id === schemaId);
-                      return schema ? (
-                        <Chip key={schemaId} label={schema.name} />
+                    {(selected as number[]).map((udfId) => {
+                      const udf = udfs.find(s => s.id === udfId);
+                      return udf ? (
+                        <Chip key={udfId} label={udf.name} />
                       ) : null;
                     })}
                   </Box>
@@ -467,14 +465,14 @@ const ReportBuilder: React.FC = () => {
                 MenuProps={MenuProps}
                 disabled={!selectedPrimaryModel || !selectedAggregationLevel || (!isCreating && selectedReport !== null)}
               >
-                {schemas
-                  .filter(schema => schema.aggregation_level === selectedAggregationLevel)
-                  .map((schema) => (
-                    <MenuItem key={schema.id} value={schema.id}>
-                      <Checkbox checked={selectedSchemaIds.includes(schema.id)} />
+                {udfs
+                  .filter(udf => udf.aggregation_level === selectedAggregationLevel)
+                  .map((udf) => (
+                    <MenuItem key={udf.id} value={udf.id}>
+                      <Checkbox checked={selectedUdfIds.includes(udf.id)} />
                       <ListItemText 
-                        primary={schema.name} 
-                        secondary={`${schema.fields.length} fields`} 
+                        primary={udf.name} 
+                        secondary={`${udf.fields.length} fields`} 
                       />
                     </MenuItem>
                   ))}
@@ -482,9 +480,9 @@ const ReportBuilder: React.FC = () => {
               <FormHelperText>
                 {!selectedAggregationLevel 
                   ? "Select an aggregation level first" 
-                  : getCompatibleSchemas().length === 0 
-                    ? `No schemas available with '${selectedAggregationLevel}' aggregation level` 
-                    : "Select schemas to include in the report"}
+                  : getCompatibleUdfs().length === 0
+                    ? `No UDFs available with '${selectedAggregationLevel}' aggregation level`
+                    : "Select UDFs to include in the report"}
               </FormHelperText>
             </FormControl>
           </Grid>
@@ -496,15 +494,15 @@ const ReportBuilder: React.FC = () => {
             <Button
               variant="outlined"
               onClick={() => setFieldSelectOpen(true)}
-              disabled={selectedSchemaIds.length === 0}
+              disabled={selectedUdfIds.length === 0}
             >
               Configure Fields
             </Button>
           </Box>
           {selectedFields.length === 0 ? (
             <Typography color="text.secondary">
-              {selectedSchemaIds.length === 0 
-                ? "Select schemas first, then configure fields." 
+              {selectedUdfIds.length === 0
+                ? "Select UDFs first, then configure fields."
                 : "No fields selected yet. Click \"Configure Fields\" to start."}
             </Typography>
           ) : (
@@ -526,7 +524,7 @@ const ReportBuilder: React.FC = () => {
             variant="contained"
             color="primary"
             onClick={handleSaveReport}
-            disabled={!reportName || !selectedPrimaryModel || !selectedAggregationLevel || selectedSchemaIds.length === 0 || selectedFields.length === 0}
+            disabled={!reportName || !selectedPrimaryModel || !selectedAggregationLevel || selectedUdfIds.length === 0 || selectedFields.length === 0}
           >
             {isCreating ? 'Create Report' : 'Update Report'}
           </Button>
@@ -623,14 +621,14 @@ const ReportBuilder: React.FC = () => {
           </Box>
           <Divider sx={{ mb: 2 }} />
           
-          {Object.entries(getFieldsBySchema()).map(([schemaName, fields]) => (
-            <Box key={schemaName} sx={{ mb: 3 }}>
+          {Object.entries(getFieldsByUdf()).map(([udfName, fields]) => (
+            <Box key={udfName} sx={{ mb: 3 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                {schemaName}
+                {udfName}
               </Typography>
               <Grid container spacing={1}>
                 {fields.map((field) => {
-                  const fieldFullName = `${schemaName}.${field.name}`;
+                  const fieldFullName = `${udfName}.${field.name}`;
                   
                   return (
                     <Grid item xs={12} sm={6} key={fieldFullName}>
